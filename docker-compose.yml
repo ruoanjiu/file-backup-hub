@@ -1,0 +1,30 @@
+name: trading-backup-hub
+
+services:
+  trading-backup-server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    container_name: trading-backup-server
+    environment:
+      APP_ENV: production
+      DATABASE_URL: sqlite:////data/trading-backup/db/app.sqlite
+      STORAGE_ROOT: /data/trading-backup/storage
+      MANIFEST_ROOT: /data/trading-backup/manifests
+      MAX_UPLOAD_SIZE_MB: 2048
+      DEFAULT_RETENTION_DAYS: 90
+      SERVER_ADMIN_TOKEN: ${SERVER_ADMIN_TOKEN:?Set SERVER_ADMIN_TOKEN in .env}
+      CLIENT_TOKENS: ${CLIENT_TOKENS:?Set CLIENT_TOKENS in .env}
+    volumes:
+      - trading_backup_data:/data/trading-backup
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  trading_backup_data:

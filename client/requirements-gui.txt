@@ -1,0 +1,6 @@
+httpx
+pyyaml
+apscheduler
+pystray
+pillow
+tzdata

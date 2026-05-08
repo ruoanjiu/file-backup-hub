@@ -1,0 +1,48 @@
+client:
+  machine_id: "trade-pc-01"
+  timezone: "Asia/Shanghai"
+  data_dir: "C:/ProgramData/TradingBackupClient"
+  temp_dir: "C:/ProgramData/TradingBackupClient/tmp"
+
+server:
+  base_url: "https://backup.example.com"
+  token: "REPLACE_WITH_CLIENT_TOKEN"
+  timeout_seconds: 60
+  verify_tls: true
+
+backup:
+  schedule_enabled: true
+  schedule_time: "04:00"
+  archive_format: "tar.gz"
+  compression: true
+  retry_count: 3
+  retry_interval_seconds: 5
+  copy_stability_check: true
+  stability_check_interval_seconds: 1
+  retention_hint_days: 90
+
+restore:
+  create_rollback_snapshot: true
+  allowed_roots:
+    - "D:/trade"
+    - "E:/trade"
+  rollback_dir: "C:/ProgramData/TradingBackupClient/rollback"
+  require_same_machine_id: true
+
+strategies:
+  - name: "alpha_grid"
+    enabled: true
+    schedule_enabled: false
+    schedule_time: "04:00"
+    roots:
+      - path: "D:/trade/alpha_grid/logs"
+        source_type: "folder"
+        recursive: true
+        include:
+          - "*.log"
+          - "*.json"
+          - "*.xlsx"
+        exclude:
+          - "*.tmp"
+          - "~$*.xlsx"
+          - "__pycache__/*"

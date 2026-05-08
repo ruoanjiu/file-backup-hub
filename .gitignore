@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+.venv-client-build/
+
+# Local runtime data
+data/
+tmp/
+logs/
+*.sqlite
+*.sqlite3
+*.db
+
+# Secrets and local config
+.env
+.env.*
+!.env.example
+!.env.docker.example
+config.yaml
+*.local.yaml
+*.local.yml
+
+# Build artifacts
+build/
+dist/
+*.spec
+*.exe
+*.zip
+*.tar.gz
+
+# Project-local backups
+client_backup_*/
+open_source_release/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
