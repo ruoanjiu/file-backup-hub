@@ -1,8 +1,8 @@
-client:
+﻿client:
   machine_id: "trade-pc-01"
   timezone: "Asia/Shanghai"
-  data_dir: "C:/ProgramData/TradingBackupClient"
-  temp_dir: "C:/ProgramData/TradingBackupClient/tmp"
+  data_dir: "C:/ProgramData/FileBackupClient"
+  temp_dir: "C:/ProgramData/FileBackupClient/tmp"
 
 server:
   base_url: "https://backup.example.com"
@@ -26,10 +26,10 @@ restore:
   allowed_roots:
     - "D:/trade"
     - "E:/trade"
-  rollback_dir: "C:/ProgramData/TradingBackupClient/rollback"
+  rollback_dir: "C:/ProgramData/FileBackupClient/rollback"
   require_same_machine_id: true
 
-strategies:
+tasks:
   - name: "alpha_grid"
     enabled: true
     schedule_enabled: false

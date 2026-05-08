@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import queue
@@ -19,7 +19,7 @@ except ImportError:  # pragma: no cover - optional runtime GUI feature
     Image = None
     ImageDraw = None
 
-from client.app.backup import run_backup_for_strategy
+from client.app.backup import run_backup_for_task
 from client.app.config import AppConfig, default_config_path, load_config
 from client.app.local_db import LocalDb
 from client.app.restore import rollback_restore, run_restore, run_verify
@@ -50,7 +50,7 @@ TITLE_FONT = ("Segoe UI", 10, "bold")
 class BackupGui:
     def __init__(self) -> None:
         self.root = tk.Tk()
-        self.root.title("日志备份与恢复客户端")
+        self.root.title("文件备份与恢复客户端")
         self.root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
         self.root.minsize(WINDOW_WIDTH, WINDOW_HEIGHT)
         self.root.aspect(
@@ -71,7 +71,7 @@ class BackupGui:
         self.server_url_var = tk.StringVar(value="http://127.0.0.1:8000")
         self.token_var = tk.StringVar(value="REPLACE_WITH_CLIENT_TOKEN")
         self.machine_id_var = tk.StringVar(value="pc1")
-        self.data_dir_var = tk.StringVar(value="C:/ProgramData/TradingBackupClient")
+        self.data_dir_var = tk.StringVar(value="C:/ProgramData/FileBackupClient")
         self.connection_status_var = tk.StringVar(value="未连接")
         self.task_name_var = tk.StringVar()
         self.task_type_var = tk.StringVar(value="once")
@@ -131,9 +131,9 @@ class BackupGui:
             pystray.MenuItem("退出程序", lambda: self.root.after(0, self._exit_app)),
         )
         self.tray_icon = pystray.Icon(
-            "TradingBackupClient",
+            "FileBackupClient",
             image,
-            "日志备份与恢复客户端",
+            "文件备份与恢复客户端",
             menu,
         )
         threading.Thread(target=self.tray_icon.run, daemon=True).start()
@@ -195,7 +195,7 @@ class BackupGui:
         header.pack_propagate(False)
         tk.Label(
             header,
-            text="日志备份与恢复客户端",
+            text="文件备份与恢复客户端",
             bg=HEADER_BG,
             fg="#ffffff",
             font=("Segoe UI", 12, "bold"),
@@ -563,16 +563,16 @@ class BackupGui:
         if self.config is None:
             return
         selected_index = 0
-        for index, strategy in enumerate(self.config.strategies):
-            label = f"{strategy.name} | {'定时 ' + strategy.schedule_time if strategy.schedule_enabled else '单次'}"
+        for index, task in enumerate(self.config.tasks):
+            label = f"{task.name} | {'定时 ' + task.schedule_time if task.schedule_enabled else '单次'}"
             self.task_list.insert(END, label)
-            if selected_task_name and strategy.name == selected_task_name:
+            if selected_task_name and task.name == selected_task_name:
                 selected_index = index
-        if self.config.strategies:
+        if self.config.tasks:
             self.task_list.selection_clear(0, END)
             self.task_list.selection_set(selected_index)
             self.task_list.see(selected_index)
-            self._load_task_to_form(self.config.strategies[selected_index].name)
+            self._load_task_to_form(self.config.tasks[selected_index].name)
 
     def _task_selected(self, _: object) -> None:
         selection = self.task_list.curselection()
@@ -584,12 +584,12 @@ class BackupGui:
     def _load_task_to_form(self, task_name: str) -> None:
         if self.config is None:
             return
-        strategy = self.config.get_strategy(task_name)
-        self.task_name_var.set(strategy.name)
-        self.task_type_var.set("scheduled" if strategy.schedule_enabled else "once")
-        self.schedule_time_var.set(strategy.schedule_time or "04:00")
+        task = self.config.get_task(task_name)
+        self.task_name_var.set(task.name)
+        self.task_type_var.set("scheduled" if task.schedule_enabled else "once")
+        self.schedule_time_var.set(task.schedule_time or "04:00")
         self.source_list.delete(0, END)
-        for root in strategy.roots:
+        for root in task.roots:
             self.source_list.insert(END, str(root.path))
         self._sync_schedule_state()
 
@@ -605,9 +605,9 @@ class BackupGui:
         path = Path(self.config_path_var.get())
         path.parent.mkdir(parents=True, exist_ok=True)
         data = self._config_to_dict()
-        if not data["strategies"]:
+        if not data["tasks"]:
             try:
-                data["strategies"].append(self._task_from_form())
+                data["tasks"].append(self._task_from_form())
             except ValueError:
                 pass
         path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
@@ -616,8 +616,8 @@ class BackupGui:
     def _save_task_clicked(self) -> None:
         task = self._task_from_form()
         data = self._config_to_dict()
-        data["strategies"] = [item for item in data["strategies"] if item["name"] != task["name"]]
-        data["strategies"].append(task)
+        data["tasks"] = [item for item in data["tasks"] if item["name"] != task["name"]]
+        data["tasks"].append(task)
         path = Path(self.config_path_var.get())
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
@@ -637,7 +637,7 @@ class BackupGui:
         if not messagebox.askyesno("确认删除任务", f"删除任务 {task_name}？已上传的备份不会被删除。"):
             return
         data = self._config_to_dict()
-        data["strategies"] = [item for item in data["strategies"] if item["name"] != task_name]
+        data["tasks"] = [item for item in data["tasks"] if item["name"] != task_name]
         Path(self.config_path_var.get()).write_text(
             yaml.safe_dump(data, allow_unicode=True, sort_keys=False),
             encoding="utf-8",
@@ -646,15 +646,15 @@ class BackupGui:
 
     def _config_to_dict(self) -> dict:
         data_dir = self.data_dir_var.get().strip()
-        strategies = []
+        tasks = []
         if self.config is not None:
-            for strategy in self.config.strategies:
-                strategies.append(
+            for task in self.config.tasks:
+                tasks.append(
                     {
-                        "name": strategy.name,
-                        "enabled": strategy.enabled,
-                        "schedule_enabled": strategy.schedule_enabled,
-                        "schedule_time": strategy.schedule_time,
+                        "name": task.name,
+                        "enabled": task.enabled,
+                        "schedule_enabled": task.schedule_enabled,
+                        "schedule_time": task.schedule_time,
                         "roots": [
                             {
                                 "path": str(root.path),
@@ -663,7 +663,7 @@ class BackupGui:
                                 "include": root.include,
                                 "exclude": root.exclude,
                             }
-                            for root in strategy.roots
+                            for root in task.roots
                         ],
                     }
                 )
@@ -688,11 +688,11 @@ class BackupGui:
             },
             "restore": {
                 "create_rollback_snapshot": True,
-                "allowed_roots": [source for source in self._all_source_roots(strategies)] or [data_dir],
+                "allowed_roots": [source for source in self._all_source_roots(tasks)] or [data_dir],
                 "rollback_dir": str(Path(data_dir) / "rollback"),
                 "require_same_machine_id": True,
             },
-            "strategies": strategies,
+            "tasks": tasks,
         }
 
     def _task_from_form(self) -> dict:
@@ -719,10 +719,10 @@ class BackupGui:
             ],
         }
 
-    def _all_source_roots(self, strategies: list[dict]) -> list[str]:
+    def _all_source_roots(self, tasks: list[dict]) -> list[str]:
         roots: list[str] = []
-        for strategy in strategies:
-            for root in strategy.get("roots", []):
+        for task in tasks:
+            for root in task.get("roots", []):
                 raw_path = root.get("path")
                 if not raw_path:
                     continue
@@ -755,8 +755,8 @@ class BackupGui:
 
         def task() -> dict:
             config = self._require_config()
-            strategy = config.get_strategy(task_name)
-            return run_backup_for_strategy(config, strategy).__dict__
+            task = config.get_task(task_name)
+            return run_backup_for_task(config, task).__dict__
 
         self._run_worker("执行当前任务", task)
 
@@ -780,7 +780,7 @@ class BackupGui:
             config = self._require_config()
             response = BackupServerClient(config.server).list_backups(
                 machine_id=config.client.machine_id,
-                strategy_name=None,
+                task_name=None,
                 limit=200,
             )
             self.backup_items = response.get("items", [])
@@ -794,7 +794,7 @@ class BackupGui:
         for item in self.backup_items:
             self.backup_list.insert(
                 END,
-                f"{item['backup_id']} | {item['strategy_name']} | {item['status']} | {item['created_at']}",
+                f"{item['backup_id']} | {item['task_name']} | {item['status']} | {item['created_at']}",
             )
 
     def _backup_selected_from_list(self, _: object) -> None:

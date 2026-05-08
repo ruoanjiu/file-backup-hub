@@ -1,4 +1,4 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
@@ -25,15 +25,15 @@ $python = Join-Path $venv "Scripts\python.exe"
 & $python -m pip install -r client\requirements-gui.txt
 & $python -m pip install pyinstaller
 
-Remove-Item -Recurse -Force -ErrorAction SilentlyContinue build\TradingBackupClient
-Remove-Item -Force -ErrorAction SilentlyContinue dist\TradingBackupClient.exe
+Remove-Item -Recurse -Force -ErrorAction SilentlyContinue build\FileBackupClient
+Remove-Item -Force -ErrorAction SilentlyContinue dist\FileBackupClient.exe
 
 & $python -m PyInstaller `
   --clean `
   --noconfirm `
   --noconsole `
   --onefile `
-  --name TradingBackupClient `
+  --name FileBackupClient `
   --hidden-import pystray._win32 `
   --hidden-import PIL._tkinter_finder `
   --collect-submodules tzdata `
@@ -45,7 +45,7 @@ Remove-Item -Force -ErrorAction SilentlyContinue dist\TradingBackupClient.exe
   --exclude-module server `
   run_client_gui.py
 
-Remove-Item -Recurse -Force -ErrorAction SilentlyContinue build\TradingBackupClient
-Remove-Item -Force -ErrorAction SilentlyContinue TradingBackupClient.spec
+Remove-Item -Recurse -Force -ErrorAction SilentlyContinue build\FileBackupClient
+Remove-Item -Force -ErrorAction SilentlyContinue FileBackupClient.spec
 
-Write-Host "Built GUI executable: $root\dist\TradingBackupClient.exe"
+Write-Host "Built GUI executable: $root\dist\FileBackupClient.exe"

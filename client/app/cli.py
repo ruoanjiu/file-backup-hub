@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import time
@@ -7,14 +7,14 @@ from typing import Annotated
 
 import typer
 
-from client.app.backup import run_backup_for_strategy
+from client.app.backup import run_backup_for_task
 from client.app.config import default_config_path, load_config
 from client.app.local_db import LocalDb
 from client.app.restore import rollback_restore, run_restore, run_verify
 from client.app.scheduler import BackupTaskScheduler
 from client.app.uploader import BackupServerClient
 
-app = typer.Typer(help="Trading backup client")
+app = typer.Typer(help="File backup client")
 config_app = typer.Typer(help="Configuration commands")
 app.add_typer(config_app, name="config")
 
@@ -41,9 +41,9 @@ def show_config(config: ConfigOption = default_config_path()) -> None:
             "timeout_seconds": loaded.server.timeout_seconds,
             "verify_tls": loaded.server.verify_tls,
         },
-        "strategies": [
-            {"name": strategy.name, "enabled": strategy.enabled}
-            for strategy in loaded.strategies
+        "tasks": [
+            {"name": task.name, "enabled": task.enabled}
+            for task in loaded.tasks
         ],
     }
     typer.echo(json.dumps(safe, ensure_ascii=False, indent=2))
@@ -51,32 +51,32 @@ def show_config(config: ConfigOption = default_config_path()) -> None:
 
 @app.command("backup")
 def backup_command(
-    all_strategies: Annotated[bool, typer.Option("--all", help="Back up all enabled strategies")] = False,
-    strategy_name: Annotated[str | None, typer.Option("--strategy", help="Back up one strategy")] = None,
+    all_tasks: Annotated[bool, typer.Option("--all", help="Back up all enabled tasks")] = False,
+    task_name: Annotated[str | None, typer.Option("--task", help="Back up one task")] = None,
     config: ConfigOption = default_config_path(),
 ) -> None:
     loaded = load_config(config)
-    if all_strategies:
-        strategies = loaded.enabled_strategies()
-    elif strategy_name:
-        strategy = loaded.get_strategy(strategy_name)
-        strategies = [strategy] if strategy.enabled else []
+    if all_tasks:
+        tasks = loaded.enabled_tasks()
+    elif task_name:
+        task = loaded.get_task(task_name)
+        tasks = [task] if task.enabled else []
     else:
-        raise typer.BadParameter("Use --all or --strategy")
+        raise typer.BadParameter("Use --all or --task")
 
-    if not strategies:
-        raise typer.BadParameter("No enabled strategies selected")
+    if not tasks:
+        raise typer.BadParameter("No enabled tasks selected")
 
     local_db = LocalDb(loaded.client.data_dir / "client.sqlite")
     server_client = BackupServerClient(loaded.server)
     failed = 0
-    for strategy in strategies:
-        result = run_backup_for_strategy(loaded, strategy, server_client, local_db)
+    for task in tasks:
+        result = run_backup_for_task(loaded, task, server_client, local_db)
         typer.echo(
             json.dumps(
                 {
                     "backup_id": result.backup_id,
-                    "strategy_name": result.strategy_name,
+                    "task_name": result.task_name,
                     "status": result.status,
                     "file_count": result.file_count,
                     "total_size": result.total_size,
@@ -94,7 +94,7 @@ def backup_command(
 
 @app.command("list")
 def list_command(
-    strategy_name: Annotated[str | None, typer.Option("--strategy", help="Filter by strategy")] = None,
+    task_name: Annotated[str | None, typer.Option("--task", help="Filter by task")] = None,
     machine_id: Annotated[str | None, typer.Option("--machine", help="Filter by machine_id")] = None,
     limit: Annotated[int, typer.Option("--limit", min=1, max=500)] = 50,
     offset: Annotated[int, typer.Option("--offset", min=0)] = 0,
@@ -103,7 +103,7 @@ def list_command(
     loaded = load_config(config)
     response = BackupServerClient(loaded.server).list_backups(
         machine_id=machine_id or loaded.client.machine_id,
-        strategy_name=strategy_name,
+        task_name=task_name,
         limit=limit,
         offset=offset,
     )

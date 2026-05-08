@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 from pathlib import Path
@@ -10,7 +10,7 @@ from client.app.config import ServerSection, load_config
 from client.app.local_db import LocalDb
 from client.app.restore import rollback_restore, run_restore, run_verify
 from client.app.uploader import BackupServerClient
-from client.tests.test_client_backup import make_strategy_files, write_config
+from client.tests.test_client_backup import make_task_files, write_config
 
 
 def _mock_restore_client(manifest: dict, bundle: bytes, bundle_sha256: str) -> httpx.MockTransport:
@@ -23,7 +23,7 @@ def _mock_restore_client(manifest: dict, bundle: bytes, bundle_sha256: str) -> h
                 json={
                     "backup_id": backup_id,
                     "machine_id": manifest["machine_id"],
-                    "strategy_name": manifest["strategy_name"],
+                    "task_name": manifest["task_name"],
                     "status": "COMPLETED",
                     "created_at": manifest["created_at"],
                     "uploaded_at": manifest["created_at"],
@@ -43,10 +43,10 @@ def _mock_restore_client(manifest: dict, bundle: bytes, bundle_sha256: str) -> h
 
 
 def test_verify_restore_and_rollback(tmp_path: Path) -> None:
-    strategy_root = tmp_path / "strategy"
-    make_strategy_files(strategy_root)
-    config = load_config(write_config(tmp_path, strategy_root))
-    prepared = prepare_backup(config, config.get_strategy("alpha_grid"))
+    task_root = tmp_path / "task"
+    make_task_files(task_root)
+    config = load_config(write_config(tmp_path, task_root))
+    prepared = prepare_backup(config, config.get_task("alpha_grid"))
     bundle = prepared.bundle_path.read_bytes()
     server_client = BackupServerClient(
         ServerSection("https://backup.example.test", "token-01"),
@@ -54,8 +54,8 @@ def test_verify_restore_and_rollback(tmp_path: Path) -> None:
     )
     local_db = LocalDb(tmp_path / "client.sqlite")
 
-    changed_file = strategy_root / "logs" / "a.log"
-    deleted_file = strategy_root / "nav" / "state.json"
+    changed_file = task_root / "logs" / "a.log"
+    deleted_file = task_root / "nav" / "state.json"
     changed_file.write_text("changed current", encoding="utf-8")
     deleted_file.unlink()
 

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -21,7 +21,7 @@ ADMIN_HTML = r"""<!doctype html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Trading Backup Server</title>
+  <title>File Backup Server</title>
   <style>
     :root {
       color-scheme: light;
@@ -163,7 +163,7 @@ ADMIN_HTML = r"""<!doctype html>
 </head>
 <body>
   <header>
-    <h1>Trading Backup Server</h1>
+    <h1>File Backup Server</h1>
     <span id="health">Server OK</span>
   </header>
   <main>
@@ -178,8 +178,8 @@ ADMIN_HTML = r"""<!doctype html>
           <input id="machine" placeholder="可选，例如 trade-pc-01" />
         </div>
         <div>
-          <label for="strategy">任务/策略过滤</label>
-          <input id="strategy" placeholder="可选" />
+          <label for="task">任务/任务过滤</label>
+          <input id="task" placeholder="可选" />
         </div>
         <button class="primary" id="loadBtn">查询备份</button>
         <button id="saveTokenBtn">保存 Token</button>
@@ -210,12 +210,12 @@ ADMIN_HTML = r"""<!doctype html>
   <script>
     const tokenInput = document.getElementById("token");
     const machineInput = document.getElementById("machine");
-    const strategyInput = document.getElementById("strategy");
+    const taskInput = document.getElementById("task");
     const statusEl = document.getElementById("status");
     const rowsEl = document.getElementById("rows");
     const healthEl = document.getElementById("health");
 
-    tokenInput.value = localStorage.getItem("tradingBackupAdminToken") || "";
+    tokenInput.value = localStorage.getItem("fileBackupAdminToken") || "";
 
     function token() {
       return tokenInput.value.trim();
@@ -255,7 +255,7 @@ ADMIN_HTML = r"""<!doctype html>
     function buildQuery() {
       const params = new URLSearchParams({ limit: "200", offset: "0" });
       if (machineInput.value.trim()) params.set("machine_id", machineInput.value.trim());
-      if (strategyInput.value.trim()) params.set("strategy_name", strategyInput.value.trim());
+      if (taskInput.value.trim()) params.set("task_name", taskInput.value.trim());
       return params.toString();
     }
 
@@ -286,7 +286,7 @@ ADMIN_HTML = r"""<!doctype html>
         <tr>
           <td>${escapeHtml(item.backup_id)}</td>
           <td>${escapeHtml(item.machine_id)}</td>
-          <td>${escapeHtml(item.strategy_name)}</td>
+          <td>${escapeHtml(item.task_name)}</td>
           <td><span class="badge">${escapeHtml(item.status)}</span></td>
           <td>${escapeHtml(item.created_at || "")}</td>
           <td>${item.file_count ?? 0}</td>
@@ -341,7 +341,7 @@ ADMIN_HTML = r"""<!doctype html>
     }
 
     function saveToken() {
-      localStorage.setItem("tradingBackupAdminToken", token());
+      localStorage.setItem("fileBackupAdminToken", token());
       setStatus("Token 已保存到当前浏览器");
     }
 

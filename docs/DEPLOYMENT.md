@@ -1,4 +1,4 @@
-# 部署说明
+﻿# 部署说明
 
 ## Server Docker 部署
 
@@ -13,7 +13,7 @@ sudo systemctl enable --now docker
 2. 上传项目到服务器，例如：
 
 ```text
-/opt/trading-backup-hub
+/opt/file-backup-hub
 ```
 
 3. 创建 `.env`。
@@ -32,7 +32,7 @@ CLIENT_TOKENS=pc1:replace-with-pc1-token,pc2:replace-with-pc2-token,pc3:replace-
 4. 启动。
 
 ```bash
-docker compose up --build -d trading-backup-server
+docker compose up --build -d file-backup-server
 docker compose ps
 curl http://127.0.0.1:8000/health
 ```
@@ -70,7 +70,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-client-exe-m
 将以下文件分发到客户端电脑：
 
 ```text
-dist\TradingBackupClient.exe
+dist\FileBackupClient.exe
 ```
 
 每台电脑首次启动后配置：

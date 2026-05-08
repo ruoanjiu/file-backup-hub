@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import fnmatch
 import json
@@ -360,7 +360,7 @@ def run_restore(
             restore_id,
             backup_id,
             str(server_manifest["machine_id"]),
-            str(server_manifest["strategy_name"]),
+            str(server_manifest["task_name"]),
             now_for_config(config).isoformat(),
             str(snapshot.rollback_dir),
         )

@@ -1,11 +1,11 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import threading
 from collections.abc import Callable
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from client.app.backup import run_backup_for_strategy
+from client.app.backup import run_backup_for_task
 from client.app.config import AppConfig
 from client.app.local_db import LocalDb
 from client.app.uploader import BackupServerClient
@@ -24,20 +24,20 @@ class BackupTaskScheduler:
                 return
             db = LocalDb(self.config.client.data_dir / "client.sqlite")
             client = BackupServerClient(self.config.server)
-            for strategy in self.config.scheduled_strategies():
-                hour, minute = _parse_schedule_time(strategy.schedule_time)
+            for task in self.config.scheduled_tasks():
+                hour, minute = _parse_schedule_time(task.schedule_time)
                 self.scheduler.add_job(
-                    run_backup_for_strategy,
+                    run_backup_for_task,
                     trigger="cron",
                     hour=hour,
                     minute=minute,
-                    args=[self.config, strategy, client, db],
-                    id=f"backup:{strategy.name}",
+                    args=[self.config, task, client, db],
+                    id=f"backup:{task.name}",
                     replace_existing=True,
                     max_instances=1,
                     coalesce=True,
                 )
-                self.log(f"Scheduled {strategy.name} at {strategy.schedule_time}")
+                self.log(f"Scheduled {task.name} at {task.schedule_time}")
             self.scheduler.start()
 
     def stop(self) -> None:

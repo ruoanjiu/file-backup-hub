@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
@@ -18,7 +18,7 @@ def test_admin_page_is_served(tmp_path) -> None:
         response = client.get("/admin")
 
     assert response.status_code == 200
-    assert "Trading Backup Server" in response.text
+    assert "File Backup Server" in response.text
     assert "/api/v1/backups" in response.text
     assert "downloadBundle" in response.text
 

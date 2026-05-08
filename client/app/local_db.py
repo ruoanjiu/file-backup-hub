@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
@@ -23,7 +23,7 @@ class LocalDb:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     backup_id TEXT NOT NULL UNIQUE,
                     machine_id TEXT NOT NULL,
-                    strategy_name TEXT NOT NULL,
+                    task_name TEXT NOT NULL,
                     status TEXT NOT NULL,
                     started_at TEXT NOT NULL,
                     finished_at TEXT,
@@ -41,7 +41,7 @@ class LocalDb:
                     restore_id TEXT NOT NULL UNIQUE,
                     backup_id TEXT NOT NULL,
                     machine_id TEXT NOT NULL,
-                    strategy_name TEXT NOT NULL,
+                    task_name TEXT NOT NULL,
                     status TEXT NOT NULL,
                     started_at TEXT NOT NULL,
                     finished_at TEXT,
@@ -69,17 +69,17 @@ class LocalDb:
         self,
         backup_id: str,
         machine_id: str,
-        strategy_name: str,
+        task_name: str,
         started_at: str,
     ) -> None:
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO backup_jobs (
-                    backup_id, machine_id, strategy_name, status, started_at
+                    backup_id, machine_id, task_name, status, started_at
                 ) VALUES (?, ?, ?, 'RUNNING', ?)
                 """,
-                (backup_id, machine_id, strategy_name, started_at),
+                (backup_id, machine_id, task_name, started_at),
             )
 
     def finish_backup_job(
@@ -120,7 +120,7 @@ class LocalDb:
         restore_id: str,
         backup_id: str,
         machine_id: str,
-        strategy_name: str,
+        task_name: str,
         started_at: str,
         rollback_dir: str,
     ) -> None:
@@ -128,10 +128,10 @@ class LocalDb:
             conn.execute(
                 """
                 INSERT INTO restore_jobs (
-                    restore_id, backup_id, machine_id, strategy_name, status, started_at, rollback_dir
+                    restore_id, backup_id, machine_id, task_name, status, started_at, rollback_dir
                 ) VALUES (?, ?, ?, ?, 'RUNNING', ?, ?)
                 """,
-                (restore_id, backup_id, machine_id, strategy_name, started_at, rollback_dir),
+                (restore_id, backup_id, machine_id, task_name, started_at, rollback_dir),
             )
 
     def finish_restore_job(
@@ -186,7 +186,7 @@ class LocalDb:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT restore_id, backup_id, machine_id, strategy_name, status,
+                SELECT restore_id, backup_id, machine_id, task_name, status,
                        started_at, finished_at, rollback_dir, error_message
                 FROM restore_jobs
                 WHERE restore_id = ?
@@ -199,7 +199,7 @@ class LocalDb:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT restore_id, backup_id, machine_id, strategy_name, status,
+                SELECT restore_id, backup_id, machine_id, task_name, status,
                        started_at, finished_at, rollback_dir, error_message
                 FROM restore_jobs
                 ORDER BY id DESC

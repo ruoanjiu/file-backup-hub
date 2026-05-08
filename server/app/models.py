@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from sqlalchemy import Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -25,7 +25,7 @@ class Backup(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     backup_id: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     machine_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
-    strategy_name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    task_name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     created_at: Mapped[str] = mapped_column(String(64), nullable=False)
     uploaded_at: Mapped[str | None] = mapped_column(String(64))

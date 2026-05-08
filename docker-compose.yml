@@ -1,22 +1,22 @@
-name: trading-backup-hub
+﻿name: file-backup-hub
 
 services:
-  trading-backup-server:
+  file-backup-server:
     build:
       context: .
       dockerfile: server/Dockerfile
-    container_name: trading-backup-server
+    container_name: file-backup-server
     environment:
       APP_ENV: production
-      DATABASE_URL: sqlite:////data/trading-backup/db/app.sqlite
-      STORAGE_ROOT: /data/trading-backup/storage
-      MANIFEST_ROOT: /data/trading-backup/manifests
+      DATABASE_URL: sqlite:////data/file-backup/db/app.sqlite
+      STORAGE_ROOT: /data/file-backup/storage
+      MANIFEST_ROOT: /data/file-backup/manifests
       MAX_UPLOAD_SIZE_MB: 2048
       DEFAULT_RETENTION_DAYS: 90
       SERVER_ADMIN_TOKEN: ${SERVER_ADMIN_TOKEN:?Set SERVER_ADMIN_TOKEN in .env}
       CLIENT_TOKENS: ${CLIENT_TOKENS:?Set CLIENT_TOKENS in .env}
     volumes:
-      - trading_backup_data:/data/trading-backup
+      - file_backup_data:/data/file-backup
     ports:
       - "8000:8000"
     healthcheck:
@@ -27,4 +27,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  trading_backup_data:
+  file_backup_data:

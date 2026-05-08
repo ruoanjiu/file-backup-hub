@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
@@ -53,7 +53,7 @@ class ProcessCheckConfig:
 
 
 @dataclass(frozen=True)
-class StrategyRootConfig:
+class TaskRootConfig:
     path: Path
     recursive: bool = True
     include: list[str] = field(default_factory=lambda: ["*"])
@@ -62,10 +62,10 @@ class StrategyRootConfig:
 
 
 @dataclass(frozen=True)
-class StrategyConfig:
+class TaskConfig:
     name: str
     enabled: bool
-    roots: list[StrategyRootConfig]
+    roots: list[TaskRootConfig]
     schedule_enabled: bool = False
     schedule_time: str = "04:00"
     process_check: ProcessCheckConfig = field(default_factory=ProcessCheckConfig)
@@ -77,30 +77,30 @@ class AppConfig:
     server: ServerSection
     backup: BackupSection
     restore: RestoreSection
-    strategies: list[StrategyConfig]
+    tasks: list[TaskConfig]
 
-    def enabled_strategies(self) -> list[StrategyConfig]:
-        return [strategy for strategy in self.strategies if strategy.enabled]
+    def enabled_tasks(self) -> list[TaskConfig]:
+        return [task for task in self.tasks if task.enabled]
 
-    def scheduled_strategies(self) -> list[StrategyConfig]:
+    def scheduled_tasks(self) -> list[TaskConfig]:
         return [
-            strategy
-            for strategy in self.strategies
-            if strategy.enabled and strategy.schedule_enabled
+            task
+            for task in self.tasks
+            if task.enabled and task.schedule_enabled
         ]
 
-    def get_strategy(self, name: str) -> StrategyConfig:
-        for strategy in self.strategies:
-            if strategy.name == name:
-                return strategy
-        raise ValueError(f"Strategy not found: {name}")
+    def get_task(self, name: str) -> TaskConfig:
+        for task in self.tasks:
+            if task.name == name:
+                return task
+        raise ValueError(f"Task not found: {name}")
 
 
 def default_config_path() -> Path:
     if os.name == "nt":
         program_data = Path(os.getenv("PROGRAMDATA", "C:/ProgramData"))
-        return program_data / "TradingBackupClient" / "config.yaml"
-    return Path("/etc/trading-backup-client/config.yaml")
+        return program_data / "FileBackupClient" / "config.yaml"
+    return Path("/etc/file-backup-client/config.yaml")
 
 
 def _as_mapping(data: Any, name: str) -> dict[str, Any]:
@@ -142,12 +142,12 @@ def _load_process_check(raw: dict[str, Any]) -> ProcessCheckConfig:
     )
 
 
-def _load_strategy_root(raw: Any, index: int) -> StrategyRootConfig:
-    root = _as_mapping(raw, f"strategies[].roots[{index}]")
-    include = _string_list(root.get("include"), f"strategies[].roots[{index}].include", ["*"])
-    exclude = _string_list(root.get("exclude"), f"strategies[].roots[{index}].exclude", [])
-    return StrategyRootConfig(
-        path=_path(root.get("path"), f"strategies[].roots[{index}].path", require_absolute=True),
+def _load_task_root(raw: Any, index: int) -> TaskRootConfig:
+    root = _as_mapping(raw, f"tasks[].roots[{index}]")
+    include = _string_list(root.get("include"), f"tasks[].roots[{index}].include", ["*"])
+    exclude = _string_list(root.get("exclude"), f"tasks[].roots[{index}].exclude", [])
+    return TaskRootConfig(
+        path=_path(root.get("path"), f"tasks[].roots[{index}].path", require_absolute=True),
         recursive=bool(root.get("recursive", True)),
         include=include or ["*"],
         exclude=exclude,
@@ -155,24 +155,24 @@ def _load_strategy_root(raw: Any, index: int) -> StrategyRootConfig:
     )
 
 
-def _load_strategy(raw: Any, index: int) -> StrategyConfig:
-    strategy = _as_mapping(raw, f"strategies[{index}]")
-    name = strategy.get("name")
+def _load_task(raw: Any, index: int) -> TaskConfig:
+    task = _as_mapping(raw, f"tasks[{index}]")
+    name = task.get("name")
     if not isinstance(name, str) or not name.strip():
-        raise ValueError(f"strategies[{index}].name must be a non-empty string")
+        raise ValueError(f"tasks[{index}].name must be a non-empty string")
     roots = [
-        _load_strategy_root(root_raw, root_index)
-        for root_index, root_raw in enumerate(_as_list(strategy.get("roots"), "roots"))
+        _load_task_root(root_raw, root_index)
+        for root_index, root_raw in enumerate(_as_list(task.get("roots"), "roots"))
     ]
     if not roots:
-        raise ValueError(f"strategy {name} must define at least one root")
-    return StrategyConfig(
+        raise ValueError(f"task {name} must define at least one root")
+    return TaskConfig(
         name=name,
-        enabled=bool(strategy.get("enabled", True)),
+        enabled=bool(task.get("enabled", True)),
         roots=roots,
-        schedule_enabled=bool(strategy.get("schedule_enabled", False)),
-        schedule_time=str(strategy.get("schedule_time", "04:00")),
-        process_check=_load_process_check(strategy),
+        schedule_enabled=bool(task.get("schedule_enabled", False)),
+        schedule_time=str(task.get("schedule_time", "04:00")),
+        process_check=_load_process_check(task),
     )
 
 
@@ -247,8 +247,8 @@ def load_config(path: Path) -> AppConfig:
             retention_hint_days=int(backup_raw.get("retention_hint_days", 90)),
         ),
         restore=restore,
-        strategies=[
-            _load_strategy(strategy_raw, index)
-            for index, strategy_raw in enumerate(_as_list(root.get("strategies"), "strategies"))
+        tasks=[
+            _load_task(task_raw, index)
+            for index, task_raw in enumerate(_as_list(root.get("tasks"), "tasks"))
         ],
     )

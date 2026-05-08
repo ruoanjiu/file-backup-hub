@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
@@ -34,7 +34,7 @@ class BackupServerClient:
         payload = {
             "backup_id": manifest["backup_id"],
             "machine_id": manifest["machine_id"],
-            "strategy_name": manifest["strategy_name"],
+            "task_name": manifest["task_name"],
             "created_at": manifest["created_at"],
             "file_count": manifest["file_count"],
             "total_size": manifest["total_size"],
@@ -69,15 +69,15 @@ class BackupServerClient:
     def list_backups(
         self,
         machine_id: str | None = None,
-        strategy_name: str | None = None,
+        task_name: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> dict[str, Any]:
         params: dict[str, Any] = {"limit": limit, "offset": offset}
         if machine_id:
             params["machine_id"] = machine_id
-        if strategy_name:
-            params["strategy_name"] = strategy_name
+        if task_name:
+            params["task_name"] = task_name
         with self._client() as client:
             response = client.get("/api/v1/backups", params=params, headers=self._headers)
             response.raise_for_status()

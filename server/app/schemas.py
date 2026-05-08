@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
@@ -24,7 +24,7 @@ class Manifest(BaseModel):
     schema_version: str
     backup_id: str
     machine_id: str
-    strategy_name: str
+    task_name: str
     created_at: datetime | None = None
     files: list[ManifestFile] = Field(default_factory=list)
 
@@ -32,7 +32,7 @@ class Manifest(BaseModel):
 class BackupInitRequest(BaseModel):
     backup_id: str
     machine_id: str
-    strategy_name: str
+    task_name: str
     created_at: datetime
     file_count: int = Field(ge=0)
     total_size: int = Field(ge=0)
@@ -56,7 +56,7 @@ class BundleUploadResponse(BaseModel):
 class BackupListItem(BaseModel):
     backup_id: str
     machine_id: str
-    strategy_name: str
+    task_name: str
     status: str
     created_at: str
     uploaded_at: str | None = None

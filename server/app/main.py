@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -20,7 +20,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         init_db()
         yield
 
-    app = FastAPI(title="trading-backup-server", lifespan=lifespan)
+    app = FastAPI(title="file-backup-server", lifespan=lifespan)
 
     if settings is not None:
         app.dependency_overrides[get_settings] = lambda: settings

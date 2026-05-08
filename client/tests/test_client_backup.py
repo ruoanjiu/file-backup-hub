@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import tarfile
@@ -8,14 +8,14 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-from client.app.backup import prepare_backup, run_backup_for_strategy
+from client.app.backup import prepare_backup, run_backup_for_task
 from client.app.config import ServerSection, load_config
 from client.app.local_db import LocalDb
-from client.app.scanner import scan_strategy_files
+from client.app.scanner import scan_task_files
 from client.app.uploader import BackupServerClient
 
 
-def write_config(tmp_path: Path, strategy_root: Path) -> Path:
+def write_config(tmp_path: Path, task_root: Path) -> Path:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         f"""
@@ -37,13 +37,13 @@ backup:
 
 restore:
   allowed_roots:
-    - "{strategy_root.as_posix()}"
+    - "{task_root.as_posix()}"
 
-strategies:
+tasks:
   - name: "alpha_grid"
     enabled: true
     roots:
-      - path: "{strategy_root.as_posix()}"
+      - path: "{task_root.as_posix()}"
         recursive: true
         include:
           - "*.log"
@@ -59,7 +59,7 @@ strategies:
     return config_path
 
 
-def make_strategy_files(root: Path) -> None:
+def make_task_files(root: Path) -> None:
     (root / "logs").mkdir(parents=True)
     (root / "nav").mkdir(parents=True)
     (root / "__pycache__").mkdir(parents=True)
@@ -72,44 +72,44 @@ def make_strategy_files(root: Path) -> None:
 
 
 def test_load_config_and_scan_files(tmp_path: Path) -> None:
-    strategy_root = tmp_path / "strategy"
-    make_strategy_files(strategy_root)
-    config = load_config(write_config(tmp_path, strategy_root))
+    task_root = tmp_path / "task"
+    make_task_files(task_root)
+    config = load_config(write_config(tmp_path, task_root))
 
     assert config.client.machine_id == "trade-pc-01"
     assert config.server.token == "token-01"
 
-    files = scan_strategy_files(config.get_strategy("alpha_grid"), config.backup)
+    files = scan_task_files(config.get_task("alpha_grid"), config.backup)
     names = sorted(path.path.name for path in files)
     assert names == ["a.log", "nav.xlsx", "state.json"]
 
 
 def test_config_supports_single_file_source_and_schedule(tmp_path: Path) -> None:
-    strategy_root = tmp_path / "strategy"
-    make_strategy_files(strategy_root)
-    single_file = strategy_root / "logs" / "a.log"
-    config_path = write_config(tmp_path, strategy_root)
+    task_root = tmp_path / "task"
+    make_task_files(task_root)
+    single_file = task_root / "logs" / "a.log"
+    config_path = write_config(tmp_path, task_root)
     raw = config_path.read_text(encoding="utf-8")
     raw = raw.replace("    enabled: true\n", "    enabled: true\n    schedule_enabled: true\n    schedule_time: \"05:30\"\n", 1)
-    raw = raw.replace(f'      - path: "{strategy_root.as_posix()}"', f'      - path: "{single_file.as_posix()}"')
+    raw = raw.replace(f'      - path: "{task_root.as_posix()}"', f'      - path: "{single_file.as_posix()}"')
     config_path.write_text(raw, encoding="utf-8")
 
     config = load_config(config_path)
-    strategy = config.get_strategy("alpha_grid")
-    assert strategy.schedule_enabled is True
-    assert strategy.schedule_time == "05:30"
+    task = config.get_task("alpha_grid")
+    assert task.schedule_enabled is True
+    assert task.schedule_time == "05:30"
 
-    files = scan_strategy_files(strategy, config.backup)
+    files = scan_task_files(task, config.backup)
     assert [item.path.name for item in files] == ["a.log"]
 
 
 def test_prepare_backup_creates_manifest_and_bundle(tmp_path: Path) -> None:
-    strategy_root = tmp_path / "strategy"
-    make_strategy_files(strategy_root)
-    config = load_config(write_config(tmp_path, strategy_root))
+    task_root = tmp_path / "task"
+    make_task_files(task_root)
+    config = load_config(write_config(tmp_path, task_root))
     created_at = datetime(2026, 4, 30, 4, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
 
-    prepared = prepare_backup(config, config.get_strategy("alpha_grid"), created_at)
+    prepared = prepare_backup(config, config.get_task("alpha_grid"), created_at)
 
     assert prepared.file_count == 3
     assert prepared.total_size > 0
@@ -138,7 +138,7 @@ def test_uploader_sends_init_then_bundle(tmp_path: Path) -> None:
     manifest = {
         "backup_id": "trade-pc-01__alpha_grid__20260430_040000__a1b2c3d4",
         "machine_id": "trade-pc-01",
-        "strategy_name": "alpha_grid",
+        "task_name": "alpha_grid",
         "created_at": "2026-04-30T04:00:00+08:00",
         "file_count": 0,
         "total_size": 0,
@@ -181,9 +181,9 @@ def test_uploader_sends_init_then_bundle(tmp_path: Path) -> None:
 
 
 def test_run_backup_records_local_db(tmp_path: Path) -> None:
-    strategy_root = tmp_path / "strategy"
-    make_strategy_files(strategy_root)
-    config = load_config(write_config(tmp_path, strategy_root))
+    task_root = tmp_path / "task"
+    make_task_files(task_root)
+    config = load_config(write_config(tmp_path, task_root))
     local_db = LocalDb(tmp_path / "client.sqlite")
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -203,9 +203,9 @@ def test_run_backup_records_local_db(tmp_path: Path) -> None:
         ServerSection("https://backup.example.test", "token-01"),
         transport=httpx.MockTransport(handler),
     )
-    result = run_backup_for_strategy(
+    result = run_backup_for_task(
         config,
-        config.get_strategy("alpha_grid"),
+        config.get_task("alpha_grid"),
         server_client=server_client,
         local_db=local_db,
     )

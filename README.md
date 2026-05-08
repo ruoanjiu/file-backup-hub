@@ -1,6 +1,6 @@
-# Trading Backup Hub
+﻿# File Backup Hub
 
-Trading Backup Hub 是一个面向多台 Windows 客户端的文件备份与恢复系统。Server 提供 FastAPI API、Web 管理页面和 Docker 部署方式；Client 提供 Tkinter 桌面界面、托盘后台运行、单次备份、每日定时备份、恢复和回滚。
+File Backup Hub 是一个面向多台 Windows 客户端的文件备份与恢复系统。Server 提供 FastAPI API、Web 管理页面和 Docker 部署方式；Client 提供 Tkinter 桌面界面、托盘后台运行、单次备份、每日定时备份、恢复和回滚。
 
 ## 功能
 
@@ -28,9 +28,9 @@ FastAPI Server
   - Web Admin 页面
 
 Docker Volume
-  - /data/trading-backup/db
-  - /data/trading-backup/storage
-  - /data/trading-backup/manifests
+  - /data/file-backup/db
+  - /data/file-backup/storage
+  - /data/file-backup/manifests
 ```
 
 ## 快速启动 Server
@@ -57,7 +57,7 @@ CLIENT_TOKENS=pc1:pc1-random-token,pc2:pc2-random-token,pc3:pc3-random-token
 启动：
 
 ```bash
-docker compose up --build -d trading-backup-server
+docker compose up --build -d file-backup-server
 ```
 
 检查：
@@ -79,7 +79,7 @@ http://127.0.0.1:8000/admin
 Windows 默认配置文件路径：
 
 ```text
-C:\ProgramData\TradingBackupClient\config.yaml
+C:\ProgramData\FileBackupClient\config.yaml
 ```
 
 示例见：
@@ -94,8 +94,8 @@ client/examples/config.example.yaml
 client:
   machine_id: "pc1"
   timezone: "Asia/Shanghai"
-  data_dir: "C:/ProgramData/TradingBackupClient"
-  temp_dir: "C:/ProgramData/TradingBackupClient/tmp"
+  data_dir: "C:/ProgramData/FileBackupClient"
+  temp_dir: "C:/ProgramData/FileBackupClient/tmp"
 
 server:
   base_url: "https://backup.example.com"
@@ -129,7 +129,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-client-exe-m
 输出：
 
 ```text
-dist\TradingBackupClient.exe
+dist\FileBackupClient.exe
 ```
 
 ## 测试

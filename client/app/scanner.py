@@ -1,11 +1,11 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import fnmatch
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from client.app.config import BackupSection, StrategyConfig, StrategyRootConfig
+from client.app.config import BackupSection, TaskConfig, TaskRootConfig
 
 
 @dataclass(frozen=True)
@@ -22,7 +22,7 @@ def _matches(path: Path, root: Path, patterns: list[str]) -> bool:
     return any(fnmatch.fnmatch(name, pattern) or fnmatch.fnmatch(rel, pattern) for pattern in patterns)
 
 
-def _iter_files(root: StrategyRootConfig) -> list[Path]:
+def _iter_files(root: TaskRootConfig) -> list[Path]:
     if not root.path.exists():
         raise FileNotFoundError(f"Backup source does not exist: {root.path}")
     if root.path.is_file():
@@ -51,9 +51,9 @@ def _is_possibly_active(path: Path, interval_seconds: float) -> bool:
     return first.st_size != second.st_size or first.st_mtime != second.st_mtime
 
 
-def scan_strategy_files(strategy: StrategyConfig, backup: BackupSection) -> list[ScannedFile]:
+def scan_task_files(task: TaskConfig, backup: BackupSection) -> list[ScannedFile]:
     scanned: list[ScannedFile] = []
-    for root in strategy.roots:
+    for root in task.roots:
         for path in _iter_files(root):
             if not _matches(path, root.path, root.include):
                 continue

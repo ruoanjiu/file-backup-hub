@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
@@ -20,7 +20,7 @@ def _parse_client_tokens(raw: str) -> dict[str, str]:
 
 @dataclass(frozen=True)
 class Settings:
-    app_name: str = "trading-backup-server"
+    app_name: str = "file-backup-server"
     app_env: str = "development"
     database_url: str = "sqlite:///./data/app.sqlite"
     storage_root: Path = Path("./data/storage")

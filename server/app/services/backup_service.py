@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import re
@@ -55,7 +55,7 @@ def init_backup(db: Session, payload: BackupInitRequest, actor: Actor, settings:
     ensure_machine_access(actor, payload.machine_id)
     validate_backup_id(payload.backup_id)
     validate_safe_id(payload.machine_id, "machine_id")
-    validate_safe_id(payload.strategy_name, "strategy_name")
+    validate_safe_id(payload.task_name, "task_name")
 
     manifest = payload.manifest
     if manifest.backup_id != payload.backup_id:
@@ -68,10 +68,10 @@ def init_backup(db: Session, payload: BackupInitRequest, actor: Actor, settings:
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="manifest.machine_id must match machine_id",
         )
-    if manifest.strategy_name != payload.strategy_name:
+    if manifest.task_name != payload.task_name:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="manifest.strategy_name must match strategy_name",
+            detail="manifest.task_name must match task_name",
         )
 
     existing = db.scalar(select(Backup).where(Backup.backup_id == payload.backup_id))
@@ -85,7 +85,7 @@ def init_backup(db: Session, payload: BackupInitRequest, actor: Actor, settings:
         settings.storage_root,
         settings.manifest_root,
         payload.machine_id,
-        payload.strategy_name,
+        payload.task_name,
         payload.backup_id,
     )
     paths.storage_dir.mkdir(parents=True, exist_ok=True)
@@ -95,7 +95,7 @@ def init_backup(db: Session, payload: BackupInitRequest, actor: Actor, settings:
     backup = Backup(
         backup_id=payload.backup_id,
         machine_id=payload.machine_id,
-        strategy_name=payload.strategy_name,
+        task_name=payload.task_name,
         status="PENDING",
         created_at=payload.created_at.isoformat(),
         uploaded_at=None,
@@ -144,7 +144,7 @@ def backup_to_list_item(backup: Backup) -> BackupListItem:
     return BackupListItem(
         backup_id=backup.backup_id,
         machine_id=backup.machine_id,
-        strategy_name=backup.strategy_name,
+        task_name=backup.task_name,
         status=backup.status,
         created_at=backup.created_at,
         uploaded_at=backup.uploaded_at,
@@ -193,7 +193,7 @@ def list_backups(
     db: Session,
     actor: Actor,
     machine_id: str | None,
-    strategy_name: str | None,
+    task_name: str | None,
     limit: int,
     offset: int,
 ) -> BackupListResponse:
@@ -212,10 +212,10 @@ def list_backups(
         validate_safe_id(machine_id, "machine_id")
         query = query.where(Backup.machine_id == machine_id)
         count_query = count_query.where(Backup.machine_id == machine_id)
-    if strategy_name:
-        validate_safe_id(strategy_name, "strategy_name")
-        query = query.where(Backup.strategy_name == strategy_name)
-        count_query = count_query.where(Backup.strategy_name == strategy_name)
+    if task_name:
+        validate_safe_id(task_name, "task_name")
+        query = query.where(Backup.task_name == task_name)
+        count_query = count_query.where(Backup.task_name == task_name)
 
     total = db.scalar(count_query) or 0
     rows = db.scalars(
@@ -260,7 +260,7 @@ def delete_backup(db: Session, backup: Backup, actor: Actor) -> None:
             continue
         if trash_base is None:
             trash_base = source_dir.parents[2] / "trash" if len(source_dir.parents) >= 3 else source_dir.parent / "trash"
-        target_dir = trash_base / backup.machine_id / backup.strategy_name / backup.backup_id / source_dir.parent.name
+        target_dir = trash_base / backup.machine_id / backup.task_name / backup.backup_id / source_dir.parent.name
         target_dir.parent.mkdir(parents=True, exist_ok=True)
         if target_dir.exists():
             shutil.rmtree(target_dir)

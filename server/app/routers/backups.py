@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from pathlib import Path
 
@@ -88,13 +88,13 @@ async def upload_bundle(
 @router.get("", response_model=BackupListResponse)
 def get_backups(
     machine_id: str | None = None,
-    strategy_name: str | None = None,
+    task_name: str | None = None,
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_current_actor),
 ) -> BackupListResponse:
-    return list_backups(db, actor, machine_id, strategy_name, limit, offset)
+    return list_backups(db, actor, machine_id, task_name, limit, offset)
 
 
 @router.get("/{backup_id}", response_model=BackupListItem)

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import hashlib
 import io
@@ -36,7 +36,7 @@ def sample_manifest(backup_id: str, machine_id: str = "trade-pc-01") -> dict:
         "schema_version": "1.0",
         "backup_id": backup_id,
         "machine_id": machine_id,
-        "strategy_name": "alpha_grid",
+        "task_name": "alpha_grid",
         "created_at": "2026-04-30T04:00:00+08:00",
         "timezone": "Asia/Shanghai",
         "archive_format": "tar.gz",
@@ -78,7 +78,7 @@ def init_payload(backup_id: str, bundle: bytes, manifest: dict) -> dict:
     return {
         "backup_id": backup_id,
         "machine_id": manifest["machine_id"],
-        "strategy_name": manifest["strategy_name"],
+        "task_name": manifest["task_name"],
         "created_at": datetime(2026, 4, 30, 4, 0, tzinfo=UTC).isoformat(),
         "file_count": 1,
         "total_size": 11,
@@ -93,7 +93,7 @@ def test_health_works_without_auth(tmp_path: Path) -> None:
         response = client.get("/health")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "app": "trading-backup-server"}
+    assert response.json() == {"status": "ok", "app": "file-backup-server"}
 
 
 def test_backup_init_upload_list_manifest_and_download(tmp_path: Path) -> None:
@@ -119,7 +119,7 @@ def test_backup_init_upload_list_manifest_and_download(tmp_path: Path) -> None:
         assert upload_response.json()["status"] == "COMPLETED"
 
         list_response = client.get(
-            "/api/v1/backups?machine_id=trade-pc-01&strategy_name=alpha_grid",
+            "/api/v1/backups?machine_id=trade-pc-01&task_name=alpha_grid",
             headers=auth("token-01"),
         )
         assert list_response.status_code == 200
@@ -157,7 +157,7 @@ def test_backup_init_upload_list_manifest_and_download(tmp_path: Path) -> None:
         assert delete_response.json()["status"] == "DELETED"
 
         list_after_delete = client.get(
-            "/api/v1/backups?machine_id=trade-pc-01&strategy_name=alpha_grid",
+            "/api/v1/backups?machine_id=trade-pc-01&task_name=alpha_grid",
             headers=auth("token-01"),
         )
         assert list_after_delete.status_code == 200

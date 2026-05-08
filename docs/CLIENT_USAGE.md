@@ -1,8 +1,8 @@
-# Client 使用说明
+﻿# Client 使用说明
 
 ## 新建备份任务
 
-1. 启动 `TradingBackupClient.exe`
+1. 启动 `FileBackupClient.exe`
 2. 填写 Server URL、Token、主机 ID
 3. 点击“保存配置”
 4. 点击“新建任务”

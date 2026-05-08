@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import hashlib
 import json
@@ -19,11 +19,11 @@ def get_storage_paths(
     storage_root: Path,
     manifest_root: Path,
     machine_id: str,
-    strategy_name: str,
+    task_name: str,
     backup_id: str,
 ) -> StoragePaths:
-    storage_dir = storage_root / machine_id / strategy_name / backup_id
-    manifest_dir = manifest_root / machine_id / strategy_name / backup_id
+    storage_dir = storage_root / machine_id / task_name / backup_id
+    manifest_dir = manifest_root / machine_id / task_name / backup_id
     return StoragePaths(
         storage_dir=storage_dir,
         manifest_dir=manifest_dir,

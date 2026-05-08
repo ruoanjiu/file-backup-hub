@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import re
 import socket
@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from client.app.config import AppConfig, StrategyConfig
+from client.app.config import AppConfig, TaskConfig
 
 SAFE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{1,255}$")
 
@@ -56,15 +56,15 @@ def infer_file_type(path: Path) -> str:
 
 def generate_backup_id(
     machine_id: str,
-    strategy_name: str,
+    task_name: str,
     created_at: datetime,
     uuid_fragment: str,
 ) -> str:
     validate_safe_id(machine_id, "machine_id")
-    validate_safe_id(strategy_name, "strategy_name")
+    validate_safe_id(task_name, "task_name")
     validate_safe_id(uuid_fragment, "uuid_fragment")
     timestamp = created_at.strftime("%Y%m%d_%H%M%S")
-    backup_id = f"{machine_id}__{strategy_name}__{timestamp}__{uuid_fragment[:8]}"
+    backup_id = f"{machine_id}__{task_name}__{timestamp}__{uuid_fragment[:8]}"
     validate_safe_id(backup_id, "backup_id")
     return backup_id
 
@@ -75,18 +75,18 @@ def now_for_config(config: AppConfig) -> datetime:
 
 def build_manifest(
     config: AppConfig,
-    strategy: StrategyConfig,
+    task: TaskConfig,
     backup_id: str,
     created_at: datetime,
     files: list[ManifestFileEntry],
 ) -> dict:
     total_size = sum(file_entry.size for file_entry in files)
-    roots = [str(root.path) for root in strategy.roots]
+    roots = [str(root.path) for root in task.roots]
     return {
         "schema_version": "1.0",
         "backup_id": backup_id,
         "machine_id": config.client.machine_id,
-        "strategy_name": strategy.name,
+        "task_name": task.name,
         "created_at": created_at.isoformat(),
         "timezone": config.client.timezone,
         "source_hostname": socket.gethostname(),
