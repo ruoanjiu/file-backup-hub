@@ -1,0 +1,27 @@
+File Backup Windows x64 source build package
+Package date: 2026-08-29
+
+Expected Windows outputs:
+  dist\FileBackupClient.exe
+  dist\FileBackupServer.exe
+  dist\SHA256SUMS.txt
+
+The scheduled backup Agent runs as the embedded
+FileBackupClient.exe --agent mode and is not distributed separately.
+
+One-click entry:
+  BUILD_WINDOWS.cmd
+
+PowerShell entry:
+  scripts\build-windows-all.ps1
+
+Excluded from this source package:
+  real .env and config files
+  tokens and credentials
+  macOS .app files
+  existing dist/build output
+  Python virtual environments
+  node_modules
+  caches, logs, databases and runtime data
+
+See docs\WINDOWS_BUILD.md before compiling.

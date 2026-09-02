@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -175,7 +175,7 @@ ADMIN_HTML = r"""<!doctype html>
         </div>
         <div>
           <label for="machine">主机 ID 过滤</label>
-          <input id="machine" placeholder="可选，例如 trade-pc-01" />
+          <input id="machine" placeholder="可选，例如 office-pc-01" />
         </div>
         <div>
           <label for="task">任务/任务过滤</label>

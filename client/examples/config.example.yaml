@@ -1,14 +1,26 @@
-﻿client:
-  machine_id: "trade-pc-01"
+client:
+  machine_id: "office-pc-01"
+  display_name: "办公电脑 A"
   timezone: "Asia/Shanghai"
   data_dir: "C:/ProgramData/FileBackupClient"
   temp_dir: "C:/ProgramData/FileBackupClient/tmp"
+  outbox_dir: "C:/ProgramData/FileBackupClient/outbox"
 
-server:
-  base_url: "https://backup.example.com"
-  token: "REPLACE_WITH_CLIENT_TOKEN"
-  timeout_seconds: 60
-  verify_tls: true
+servers:
+  - id: "server-a"
+    name: "Server A"
+    base_url: "https://backup-a.example.com"
+    token: "REPLACE_WITH_SERVER_A_CLIENT_TOKEN"
+    timeout_seconds: 60
+    verify_tls: true
+    enabled: true
+  - id: "server-b"
+    name: "Server B"
+    base_url: "https://backup-b.example.com"
+    token: "REPLACE_WITH_SERVER_B_CLIENT_TOKEN"
+    timeout_seconds: 60
+    verify_tls: true
+    enabled: true
 
 backup:
   schedule_enabled: true
@@ -20,22 +32,32 @@ backup:
   copy_stability_check: true
   stability_check_interval_seconds: 1
   retention_hint_days: 90
+  required_copies: 2
+  keep_local_until_all_uploaded: true
 
 restore:
   create_rollback_snapshot: true
   allowed_roots:
-    - "D:/trade"
-    - "E:/trade"
+    - "D:/BackupData"
+    - "E:/BackupData"
   rollback_dir: "C:/ProgramData/FileBackupClient/rollback"
   require_same_machine_id: true
 
+transfer:
+  inbox_dir: "C:/Users/Public/Downloads/FileBackup Inbox"
+  temp_dir: "C:/ProgramData/FileBackupClient/transfer-tmp"
+  allowed_send_roots:
+    - "D:/BackupData"
+  require_confirmation: true
+  overwrite_existing: false
+
 tasks:
-  - name: "alpha_grid"
+  - name: "documents_backup"
     enabled: true
     schedule_enabled: false
     schedule_time: "04:00"
     roots:
-      - path: "D:/trade/alpha_grid/logs"
+      - path: "D:/BackupData/documents_backup/logs"
         source_type: "folder"
         recursive: true
         include:

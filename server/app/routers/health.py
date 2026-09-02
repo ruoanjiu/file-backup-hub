@@ -10,4 +10,4 @@ router = APIRouter()
 
 @router.get("/health", response_model=HealthResponse)
 def health(settings: Settings = Depends(get_settings)) -> HealthResponse:
-    return HealthResponse(status="ok", app=settings.app_name)
+    return HealthResponse(status="ok", app=settings.app_name, server_id=settings.server_id)

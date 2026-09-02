@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import hashlib
 import io
@@ -18,10 +18,13 @@ def make_client(tmp_path: Path) -> TestClient:
         database_url=f"sqlite:///{tmp_path / 'app.sqlite'}",
         storage_root=tmp_path / "storage",
         manifest_root=tmp_path / "manifests",
+        trash_root=tmp_path / "trash",
+        transfer_root=tmp_path / "transfers",
         server_admin_token="admin-token",
+        allow_backup_delete=True,
         client_tokens={
-            "trade-pc-01": "token-01",
-            "trade-pc-02": "token-02",
+            "office-pc-01": "token-01",
+            "office-pc-02": "token-02",
         },
     )
     return TestClient(create_app(settings))
@@ -31,22 +34,22 @@ def auth(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def sample_manifest(backup_id: str, machine_id: str = "trade-pc-01") -> dict:
+def sample_manifest(backup_id: str, machine_id: str = "office-pc-01") -> dict:
     return {
         "schema_version": "1.0",
         "backup_id": backup_id,
         "machine_id": machine_id,
-        "task_name": "alpha_grid",
+        "task_name": "documents_backup",
         "created_at": "2026-04-30T04:00:00+08:00",
         "timezone": "Asia/Shanghai",
         "archive_format": "tar.gz",
         "file_count": 1,
         "total_size": 11,
-        "roots": ["D:/trade/alpha_grid/logs"],
+        "roots": ["D:/BackupData/documents_backup/logs"],
         "files": [
             {
                 "file_id": "000001",
-                "original_path": "D:/trade/alpha_grid/logs/a.log",
+                "original_path": "D:/BackupData/documents_backup/logs/a.log",
                 "backup_path": "files/000001.log",
                 "file_name": "a.log",
                 "file_type": "log",
@@ -93,11 +96,15 @@ def test_health_works_without_auth(tmp_path: Path) -> None:
         response = client.get("/health")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "app": "file-backup-server"}
+    assert response.json() == {
+        "status": "ok",
+        "app": "file-backup-server",
+        "server_id": "server-1",
+    }
 
 
 def test_backup_init_upload_list_manifest_and_download(tmp_path: Path) -> None:
-    backup_id = "trade-pc-01__alpha_grid__20260430_040000__a1b2c3d4"
+    backup_id = "office-pc-01__documents_backup__20260430_040000__a1b2c3d4"
     manifest = sample_manifest(backup_id)
     bundle = make_bundle(manifest)
 
@@ -119,7 +126,7 @@ def test_backup_init_upload_list_manifest_and_download(tmp_path: Path) -> None:
         assert upload_response.json()["status"] == "COMPLETED"
 
         list_response = client.get(
-            "/api/v1/backups?machine_id=trade-pc-01&task_name=alpha_grid",
+            "/api/v1/backups?machine_id=office-pc-01&task_name=documents_backup",
             headers=auth("token-01"),
         )
         assert list_response.status_code == 200
@@ -153,11 +160,22 @@ def test_backup_init_upload_list_manifest_and_download(tmp_path: Path) -> None:
             f"/api/v1/backups/{backup_id}",
             headers=auth("token-01"),
         )
+        assert delete_response.status_code == 403
+
+        delete_response = client.delete(
+            f"/api/v1/backups/{backup_id}",
+            headers=auth("admin-token"),
+        )
         assert delete_response.status_code == 200
         assert delete_response.json()["status"] == "DELETED"
 
+        trash_bundle = tmp_path / "trash" / "storage" / "office-pc-01" / "documents_backup" / backup_id / "bundle.tar.gz"
+        trash_manifest = tmp_path / "trash" / "manifests" / "office-pc-01" / "documents_backup" / backup_id / "manifest.json"
+        assert trash_bundle.read_bytes() == bundle
+        assert json.loads(trash_manifest.read_text(encoding="utf-8"))["backup_id"] == backup_id
+
         list_after_delete = client.get(
-            "/api/v1/backups?machine_id=trade-pc-01&task_name=alpha_grid",
+            "/api/v1/backups?machine_id=office-pc-01&task_name=documents_backup",
             headers=auth("token-01"),
         )
         assert list_after_delete.status_code == 200
@@ -165,7 +183,7 @@ def test_backup_init_upload_list_manifest_and_download(tmp_path: Path) -> None:
 
 
 def test_client_cannot_access_another_machine(tmp_path: Path) -> None:
-    backup_id = "trade-pc-01__alpha_grid__20260430_040000__a1b2c3d4"
+    backup_id = "office-pc-01__documents_backup__20260430_040000__a1b2c3d4"
     manifest = sample_manifest(backup_id)
     bundle = make_bundle(manifest)
 
@@ -178,14 +196,14 @@ def test_client_cannot_access_another_machine(tmp_path: Path) -> None:
         assert response.status_code == 403
 
         list_response = client.get(
-            "/api/v1/backups?machine_id=trade-pc-01",
+            "/api/v1/backups?machine_id=office-pc-01",
             headers=auth("token-02"),
         )
         assert list_response.status_code == 403
 
 
 def test_upload_rejects_sha256_mismatch(tmp_path: Path) -> None:
-    backup_id = "trade-pc-01__alpha_grid__20260430_040000__a1b2c3d4"
+    backup_id = "office-pc-01__documents_backup__20260430_040000__a1b2c3d4"
     manifest = sample_manifest(backup_id)
     bundle = make_bundle(manifest)
 
@@ -204,3 +222,19 @@ def test_upload_rejects_sha256_mismatch(tmp_path: Path) -> None:
         )
         assert upload_response.status_code == 400
         assert "SHA256" in upload_response.json()["detail"]
+
+        retry_init = client.post(
+            "/api/v1/backups/init",
+            json=init_payload(backup_id, bundle, manifest),
+            headers=auth("token-01"),
+        )
+        assert retry_init.status_code == 201
+        assert retry_init.json()["status"] == "PENDING"
+
+        retry_upload = client.put(
+            f"/api/v1/backups/{backup_id}/bundle",
+            content=bundle,
+            headers=auth("token-01"),
+        )
+        assert retry_upload.status_code == 200
+        assert retry_upload.json()["status"] == "COMPLETED"

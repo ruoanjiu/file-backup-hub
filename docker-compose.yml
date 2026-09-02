@@ -1,4 +1,4 @@
-﻿name: file-backup-hub
+name: file-backup-hub
 
 services:
   file-backup-server:
@@ -8,13 +8,18 @@ services:
     container_name: file-backup-server
     environment:
       APP_ENV: production
+      SERVER_ID: ${SERVER_ID:?Set a unique SERVER_ID in .env}
       DATABASE_URL: sqlite:////data/file-backup/db/app.sqlite
       STORAGE_ROOT: /data/file-backup/storage
       MANIFEST_ROOT: /data/file-backup/manifests
+      TRASH_ROOT: /data/file-backup/trash
+      TRANSFER_ROOT: /data/file-backup/transfers
       MAX_UPLOAD_SIZE_MB: 2048
+      MAX_TRANSFER_SIZE_MB: 2048
       DEFAULT_RETENTION_DAYS: 90
       SERVER_ADMIN_TOKEN: ${SERVER_ADMIN_TOKEN:?Set SERVER_ADMIN_TOKEN in .env}
       CLIENT_TOKENS: ${CLIENT_TOKENS:?Set CLIENT_TOKENS in .env}
+      ALLOW_BACKUP_DELETE: ${ALLOW_BACKUP_DELETE:-false}
     volumes:
       - file_backup_data:/data/file-backup
     ports:

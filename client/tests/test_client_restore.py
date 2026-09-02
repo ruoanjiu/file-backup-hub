@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 from pathlib import Path
@@ -10,7 +10,11 @@ from client.app.config import ServerSection, load_config
 from client.app.local_db import LocalDb
 from client.app.restore import rollback_restore, run_restore, run_verify
 from client.app.uploader import BackupServerClient
-from client.tests.test_client_backup import make_task_files, write_config
+from client.tests.test_client_backup import (
+    make_task_files,
+    write_config,
+    write_dual_server_config,
+)
 
 
 def _mock_restore_client(manifest: dict, bundle: bytes, bundle_sha256: str) -> httpx.MockTransport:
@@ -46,7 +50,7 @@ def test_verify_restore_and_rollback(tmp_path: Path) -> None:
     task_root = tmp_path / "task"
     make_task_files(task_root)
     config = load_config(write_config(tmp_path, task_root))
-    prepared = prepare_backup(config, config.get_task("alpha_grid"))
+    prepared = prepare_backup(config, config.get_task("documents_backup"))
     bundle = prepared.bundle_path.read_bytes()
     server_client = BackupServerClient(
         ServerSection("https://backup.example.test", "token-01"),
@@ -79,3 +83,47 @@ def test_verify_restore_and_rollback(tmp_path: Path) -> None:
     assert rollback_result.rolled_back_count == 3
     assert changed_file.read_text(encoding="utf-8") == "changed current"
     assert not deleted_file.exists()
+
+
+def test_auto_verify_falls_back_and_explicit_server_can_be_selected(tmp_path: Path) -> None:
+    task_root = tmp_path / "task"
+    make_task_files(task_root)
+    config = load_config(write_dual_server_config(tmp_path, task_root))
+    prepared = prepare_backup(config, config.get_task("documents_backup"))
+    bundle = prepared.bundle_path.read_bytes()
+    clients = {
+        "server-a": BackupServerClient(
+            config.get_server("server-a"),
+            transport=_mock_restore_client(
+                prepared.manifest,
+                b"corrupted bundle",
+                prepared.bundle_sha256,
+            ),
+        ),
+        "server-b": BackupServerClient(
+            config.get_server("server-b"),
+            transport=_mock_restore_client(
+                prepared.manifest,
+                bundle,
+                prepared.bundle_sha256,
+            ),
+        ),
+    }
+
+    automatic = run_verify(
+        config,
+        prepared.backup_id,
+        server_id="auto",
+        server_clients=clients,
+    )
+    assert automatic.status == "SUCCESS"
+    assert automatic.server_id == "server-b"
+
+    explicit = run_verify(
+        config,
+        prepared.backup_id,
+        server_id="server-b",
+        server_clients=clients,
+    )
+    assert explicit.status == "SUCCESS"
+    assert explicit.server_id == "server-b"
