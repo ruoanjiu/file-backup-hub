@@ -39,20 +39,7 @@ cd "$project_root"
   --exclude-module server \
   run_client_gui.py
 
-"$build_env/bin/python" -m PyInstaller \
-  --clean \
-  --noconfirm \
-  --name FileBackupClientAgent \
-  --icon "$project_root/assets/app-icon.icns" \
-  --collect-submodules tzdata \
-  --exclude-module fastapi \
-  --exclude-module uvicorn \
-  --exclude-module sqlalchemy \
-  --exclude-module pytest \
-  --exclude-module server \
-  run_client_agent.py
-
-rm -rf "$project_root/build/FileBackupClient" "$project_root/build/FileBackupClientAgent"
-rm -f "$project_root/FileBackupClient.spec" "$project_root/FileBackupClientAgent.spec"
+rm -rf "$project_root/build/FileBackupClient"
+rm -f "$project_root/FileBackupClient.spec"
 print "Built macOS app: $project_root/dist/FileBackupClient.app"
-print "Built macOS agent: $project_root/dist/FileBackupClientAgent/FileBackupClientAgent"
+print "The scheduled Agent is embedded in FileBackupClient.app via --agent mode."
