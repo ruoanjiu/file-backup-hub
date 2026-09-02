@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import re
 import secrets
 from datetime import UTC, datetime, timedelta
@@ -17,6 +16,27 @@ from server.app.utils.time import utc_now_iso
 
 
 SAFE_DEVICE_ID = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
+
+
+def _audit_device(
+    db: Session,
+    *,
+    actor_type: str,
+    actor_id: str,
+    action: str,
+    machine_id: str,
+) -> None:
+    db.add(
+        AuditLog(
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action=action,
+            target=machine_id,
+            ip_address=None,
+            created_at=utc_now_iso(),
+            detail_json=None,
+        )
+    )
 
 
 def _validate_device_id(machine_id: str) -> str:
@@ -88,7 +108,7 @@ def pair_device(
     if datetime.fromisoformat(record.expires_at) < now:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pairing code has expired")
     existing = db.scalar(select(Client).where(Client.machine_id == machine_id))
-    if existing is not None and existing.enabled:
+    if existing is not None and bool(existing.enabled):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="device_id is already paired")
 
     token = f"fb1:{machine_id}:{secrets.token_urlsafe(32)}"
@@ -104,6 +124,7 @@ def pair_device(
             last_seen_at=now_text,
         )
         db.add(client)
+        audit_action = "device.paired"
     else:
         client = existing
         client.display_name = display_name
@@ -111,17 +132,14 @@ def pair_device(
         client.enabled = 1
         client.updated_at = now_text
         client.last_seen_at = now_text
+        audit_action = "device.reactivated"
     record.used_at = now_text
-    db.add(
-        AuditLog(
-            actor_type="pairing",
-            actor_id=machine_id,
-            action="device.paired" if existing is None else "device.repaired",
-            target=machine_id,
-            ip_address=None,
-            created_at=now_text,
-            detail_json=json.dumps({"reactivated": existing is not None}),
-        )
+    _audit_device(
+        db,
+        actor_type="admin",
+        actor_id=record.created_by,
+        action=audit_action,
+        machine_id=machine_id,
     )
     db.commit()
     db.refresh(client)
@@ -187,13 +205,18 @@ def revoke_device(
     actor: Actor,
     *,
     machine_id: str,
-    allow_self: bool = False,
+    admin_only: bool = False,
 ) -> Client:
     machine_id = _validate_device_id(machine_id)
-    if not actor.is_admin and not (allow_self and actor.machine_id == machine_id):
+    if admin_only and not actor.is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only an administrator or the device itself may revoke this pairing",
+            detail="Admin token required",
+        )
+    if not actor.is_admin and actor.machine_id != machine_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="A device may revoke only itself",
         )
     client = db.scalar(select(Client).where(Client.machine_id == machine_id))
     if client is None:
@@ -201,22 +224,18 @@ def revoke_device(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Paired device not found",
         )
-    now_text = utc_now_iso()
-    client.enabled = 0
-    client.updated_at = now_text
-    db.add(
-        AuditLog(
+    if bool(client.enabled):
+        client.enabled = 0
+        client.updated_at = utc_now_iso()
+        _audit_device(
+            db,
             actor_type=actor.actor_type,
             actor_id=actor.actor_id,
-            action="device.revoked",
-            target=machine_id,
-            ip_address=None,
-            created_at=now_text,
-            detail_json=json.dumps({"soft_revoke": True}),
+            action="device.revoked.admin" if actor.is_admin else "device.revoked.self",
+            machine_id=machine_id,
         )
-    )
-    db.commit()
-    db.refresh(client)
+        db.commit()
+        db.refresh(client)
     return client
 
 
@@ -230,7 +249,7 @@ def remove_revoked_device(
     if not actor.is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Administrator token required to remove a device record",
+            detail="Admin token required",
         )
     client = db.scalar(select(Client).where(Client.machine_id == machine_id))
     if client is None:
@@ -238,28 +257,18 @@ def remove_revoked_device(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Paired device not found",
         )
-    if client.enabled:
+    if bool(client.enabled):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Revoke the device before removing its record",
         )
-    now_text = utc_now_iso()
     db.delete(client)
-    db.add(
-        AuditLog(
-            actor_type=actor.actor_type,
-            actor_id=actor.actor_id,
-            action="device.record.removed",
-            target=machine_id,
-            ip_address=None,
-            created_at=now_text,
-            detail_json=json.dumps(
-                {
-                    "device_record_only": True,
-                    "backups_deleted": False,
-                }
-            ),
-        )
+    _audit_device(
+        db,
+        actor_type=actor.actor_type,
+        actor_id=actor.actor_id,
+        action="device.record.removed",
+        machine_id=machine_id,
     )
     db.commit()
     return machine_id

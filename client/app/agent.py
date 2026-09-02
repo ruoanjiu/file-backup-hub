@@ -7,6 +7,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from client.app.backup import retry_backup_destinations
+from client.app.agent_runtime import claim_agent_instance, release_agent_instance
 from client.app.config import AppConfig, load_config
 from client.app.local_db import LocalDb
 from client.app.scheduler import BackupTaskScheduler
@@ -48,19 +49,25 @@ def retry_outbox(config: AppConfig, db: LocalDb, logger: logging.Logger) -> None
 def run_agent(config_path: Path) -> None:
     config = load_config(config_path)
     logger = configure_agent_logging(config.client.data_dir)
+    if not claim_agent_instance(config):
+        logger.info("client agent already running; duplicate process exiting")
+        return
     db = LocalDb(config.client.data_dir / "client.sqlite")
-    retry_outbox(config, db, logger)
     scheduler = BackupTaskScheduler(config, logger.info)
-    scheduler.start()
-    logger.info("client agent started machine_id=%s", config.client.machine_id)
+    try:
+        retry_outbox(config, db, logger)
+        scheduler.start()
+        logger.info("client agent started machine_id=%s", config.client.machine_id)
 
-    stop_event = threading.Event()
+        stop_event = threading.Event()
 
-    def stop_handler(*_: object) -> None:
-        stop_event.set()
+        def stop_handler(*_: object) -> None:
+            stop_event.set()
 
-    signal.signal(signal.SIGTERM, stop_handler)
-    signal.signal(signal.SIGINT, stop_handler)
-    stop_event.wait()
-    scheduler.stop()
-    logger.info("client agent stopped")
+        signal.signal(signal.SIGTERM, stop_handler)
+        signal.signal(signal.SIGINT, stop_handler)
+        stop_event.wait()
+    finally:
+        scheduler.stop()
+        release_agent_instance(config)
+        logger.info("client agent stopped")

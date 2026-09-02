@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
-import re
 import shutil
+import re
 import tarfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
@@ -19,15 +20,13 @@ from server.app.transfer_schemas import (
     TransferInitRequest,
     TransferItem,
     TransferListResponse,
-    TransferManifest,
 )
-from server.app.utils.hashing import calculate_sha256
 from server.app.utils.time import utc_now_iso
 
 
 SAFE_ID = re.compile(r"^[A-Za-z0-9_.-]{1,255}$")
 SERVER_RECEIVER_ID = "__server__"
-ACTIONABLE_TRANSFER_STATUSES = {"AVAILABLE", "ACCEPTED"}
+SERVER_INBOX_DIR_NAME = "server-inbox"
 
 
 def _validate_id(value: str, field_name: str) -> str:
@@ -167,19 +166,26 @@ def transfer_to_item(transfer: Transfer) -> TransferItem:
     )
 
 
-def list_inbox(db: Session, actor: Actor, limit: int) -> TransferListResponse:
+def list_inbox(
+    db: Session,
+    actor: Actor,
+    limit: int,
+    *,
+    receiver_device_id: str | None = None,
+) -> TransferListResponse:
     if actor.machine_id is None and not actor.is_admin:
         raise HTTPException(status_code=403, detail="Device identity required")
     query = select(Transfer)
     count_query = select(func.count()).select_from(Transfer)
-    if actor.is_admin:
-        query = query.where(Transfer.receiver_device_id == SERVER_RECEIVER_ID)
-        count_query = count_query.where(Transfer.receiver_device_id == SERVER_RECEIVER_ID)
-    else:
+    if not actor.is_admin:
         query = query.where(Transfer.receiver_device_id == actor.machine_id)
         count_query = count_query.where(Transfer.receiver_device_id == actor.machine_id)
-    query = query.where(Transfer.status.in_(ACTIONABLE_TRANSFER_STATUSES))
-    count_query = count_query.where(Transfer.status.in_(ACTIONABLE_TRANSFER_STATUSES))
+    elif receiver_device_id is not None:
+        query = query.where(Transfer.receiver_device_id == receiver_device_id)
+        count_query = count_query.where(Transfer.receiver_device_id == receiver_device_id)
+    actionable = ("AVAILABLE", "ACCEPTED")
+    query = query.where(Transfer.status.in_(actionable))
+    count_query = count_query.where(Transfer.status.in_(actionable))
     rows = db.scalars(query.order_by(Transfer.created_at.desc()).limit(limit)).all()
     return TransferListResponse(
         items=[transfer_to_item(item) for item in rows],
@@ -212,15 +218,19 @@ def set_transfer_status(
     return transfer
 
 
-def _canonical_json(data: dict) -> str:
-    return json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+def server_inbox_path(settings: Settings, transfer_id: str) -> Path:
+    _validate_id(transfer_id, "transfer_id")
+    return (
+        settings.transfer_root / SERVER_INBOX_DIR_NAME / transfer_id
+    ).resolve(strict=False)
 
 
-def _validate_server_transfer(transfer: Transfer, actor: Actor) -> None:
-    if not actor.is_admin:
-        raise HTTPException(status_code=403, detail="Administrator token required")
-    if transfer.receiver_device_id != SERVER_RECEIVER_ID:
-        raise HTTPException(status_code=409, detail="Transfer is not addressed to this Server")
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as file_obj:
+        for chunk in iter(lambda: file_obj.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def receive_transfer_on_server(
@@ -228,106 +238,69 @@ def receive_transfer_on_server(
     transfer: Transfer,
     actor: Actor,
     settings: Settings,
-) -> tuple[Transfer, Path, int]:
-    _validate_server_transfer(transfer, actor)
-    destination = settings.transfer_root / "server-inbox" / transfer.transfer_id
-    if transfer.status == "COMPLETED" and destination.is_dir():
-        return transfer, destination, transfer.file_count
-    if transfer.status not in ACTIONABLE_TRANSFER_STATUSES:
+) -> tuple[Transfer, Path]:
+    if not actor.is_admin:
+        raise HTTPException(status_code=403, detail="Admin token required")
+    if transfer.receiver_device_id != SERVER_RECEIVER_ID:
+        raise HTTPException(status_code=422, detail="Transfer is not addressed to this Server")
+    destination = server_inbox_path(settings, transfer.transfer_id)
+    if transfer.status == "COMPLETED":
+        if not destination.is_dir():
+            raise HTTPException(status_code=404, detail="Server inbox files are missing")
+        return transfer, destination
+    if transfer.status == "AVAILABLE":
+        transfer = set_transfer_status(db, transfer, actor, "ACCEPTED")
+    if transfer.status != "ACCEPTED":
         raise HTTPException(
             status_code=409,
-            detail=f"Transfer cannot be received from {transfer.status}",
+            detail=f"Cannot receive Server transfer from {transfer.status}",
         )
-    if transfer.status == "AVAILABLE":
-        transfer.status = "ACCEPTED"
-        transfer.updated_at = utc_now_iso()
-        db.commit()
 
     bundle_path = Path(transfer.storage_path)
-    manifest_path = Path(transfer.manifest_path)
+    manifest = read_json(Path(transfer.manifest_path))
+    if not bundle_path.is_file() or _sha256_file(bundle_path) != transfer.bundle_sha256:
+        raise HTTPException(status_code=400, detail="Transfer bundle verification failed")
+    if destination.exists():
+        raise HTTPException(status_code=409, detail="Server inbox destination already exists")
+    destination.parent.mkdir(parents=True, exist_ok=True)
     temp_destination = destination.with_name(destination.name + ".receiving")
+    if temp_destination.exists():
+        shutil.rmtree(temp_destination)
+    temp_destination.mkdir(parents=True)
     try:
-        if not bundle_path.is_file() or calculate_sha256(bundle_path) != transfer.bundle_sha256:
-            raise ValueError("Transfer bundle SHA256 mismatch")
-        manifest = read_json(manifest_path)
-        if manifest.get("receiver_device_id") != SERVER_RECEIVER_ID:
-            raise ValueError("Transfer manifest is not addressed to this Server")
-        if temp_destination.exists():
-            shutil.rmtree(temp_destination)
-        temp_destination.mkdir(parents=True, exist_ok=True)
         with tarfile.open(bundle_path, "r:gz") as archive:
-            member_list = archive.getmembers()
-            members = {member.name: member for member in member_list}
-            if len(members) != len(member_list):
-                raise ValueError("Transfer bundle contains duplicate paths")
-            bundled_manifest_member = members.get("manifest.json")
-            if bundled_manifest_member is None or not bundled_manifest_member.isfile():
-                raise ValueError("Transfer bundle manifest is missing")
-            manifest_stream = archive.extractfile(bundled_manifest_member)
-            if manifest_stream is None:
-                raise ValueError("Transfer bundle manifest cannot be read")
-            bundled_manifest = json.loads(manifest_stream.read().decode("utf-8"))
-            normalized_bundled_manifest = TransferManifest.model_validate(
-                bundled_manifest
-            ).model_dump(mode="json")
-            normalized_stored_manifest = TransferManifest.model_validate(manifest).model_dump(
-                mode="json"
-            )
-            if _canonical_json(normalized_bundled_manifest) != _canonical_json(
-                normalized_stored_manifest
-            ):
-                raise ValueError("Stored and bundled transfer manifests do not match")
-            expected_names = {
-                "manifest.json",
-                *(str(entry["backup_path"]) for entry in manifest.get("files", [])),
-            }
-            if set(members) != expected_names:
-                raise ValueError("Transfer bundle contains missing or unexpected paths")
-
-            received = 0
-            total_size = 0
             for entry in manifest.get("files", []):
                 relative = PurePosixPath(str(entry["relative_path"]))
                 backup_path = PurePosixPath(str(entry["backup_path"]))
                 if relative.is_absolute() or backup_path.is_absolute():
                     raise ValueError("Transfer manifest contains an absolute path")
-                if any(part in {"", ".", ".."} for part in (*relative.parts, *backup_path.parts)):
+                if any(
+                    part in {"", ".", ".."}
+                    for part in (*relative.parts, *backup_path.parts)
+                ):
                     raise ValueError("Transfer manifest contains an unsafe path")
-                member = members.get(backup_path.as_posix())
-                if member is None or not member.isfile() or member.issym() or member.islnk():
-                    raise ValueError(f"Transfer bundle file is missing or unsafe: {backup_path}")
+                member = archive.getmember(backup_path.as_posix())
+                if not member.isfile():
+                    raise ValueError(f"Transfer member is not a regular file: {backup_path}")
                 source = archive.extractfile(member)
                 if source is None:
-                    raise ValueError(f"Transfer bundle file cannot be read: {backup_path}")
+                    raise ValueError(f"Transfer member is missing: {backup_path}")
                 target = temp_destination / Path(*relative.parts)
                 target.parent.mkdir(parents=True, exist_ok=True)
-                with target.open("wb") as output:
-                    shutil.copyfileobj(source, output)
-                if target.stat().st_size != int(entry["size"]):
-                    raise ValueError(f"Transferred file size mismatch: {relative}")
-                if calculate_sha256(target) != entry["sha256"]:
-                    raise ValueError(f"Transferred file SHA256 mismatch: {relative}")
-                received += 1
-                total_size += target.stat().st_size
-        if received != transfer.file_count or total_size != transfer.total_size:
-            raise ValueError("Received transfer totals do not match metadata")
-        write_json_atomic(temp_destination / "manifest.json", manifest)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        if destination.exists():
-            raise ValueError("Server inbox destination already exists")
+                with source, target.open("wb") as destination_file:
+                    shutil.copyfileobj(source, destination_file)
+                if _sha256_file(target) != entry["sha256"]:
+                    raise ValueError(f"Transferred file verification failed: {relative}")
+        (temp_destination / "transfer-manifest.json").write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
         temp_destination.replace(destination)
-        transfer.status = "COMPLETED"
-        transfer.error_message = None
-        transfer.updated_at = utc_now_iso()
-        db.commit()
-        db.refresh(transfer)
-        return transfer, destination, received
-    except Exception as error:
-        transfer.error_message = str(error)
-        transfer.updated_at = utc_now_iso()
-        db.commit()
+        transfer = set_transfer_status(db, transfer, actor, "COMPLETED")
+        return transfer, destination
+    except Exception as exc:
         if temp_destination.exists():
             shutil.rmtree(temp_destination)
-        if isinstance(error, HTTPException):
+        if isinstance(exc, HTTPException):
             raise
-        raise HTTPException(status_code=400, detail=str(error)) from error
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

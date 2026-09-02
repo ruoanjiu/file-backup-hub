@@ -224,7 +224,7 @@ def _load_task(raw: Any, index: int) -> TaskConfig:
 def _load_server(raw: Any, index: int) -> ServerSection:
     server = _as_mapping(raw, f"servers[{index}]")
     base_url = server.get("base_url")
-    token = server.get("token")
+    token = server.get("token") or ""
     enabled = bool(server.get("enabled", True))
     if not isinstance(base_url, str) or not base_url.strip():
         raise ValueError(f"servers[{index}].base_url must be a non-empty string")
@@ -235,7 +235,7 @@ def _load_server(raw: Any, index: int) -> ServerSection:
         raise ValueError(f"servers[{index}].id must be a non-empty string")
     return ServerSection(
         base_url=base_url.rstrip("/"),
-        token=token,
+        token=token.strip(),
         timeout_seconds=float(server.get("timeout_seconds", 60)),
         verify_tls=bool(server.get("verify_tls", True)),
         id=server_id.strip(),
@@ -356,10 +356,13 @@ def load_config(path: Path) -> AppConfig:
         ],
     )
     enabled_server_count = sum(server.enabled for server in servers)
-    required_copies = int(backup_raw.get("required_copies", enabled_server_count))
-    if enabled_server_count == 0 and required_copies != 0:
-        raise ValueError("backup.required_copies must be 0 when no Server is enabled")
-    if enabled_server_count > 0 and (
+    configured_required_copies = int(
+        backup_raw.get("required_copies", enabled_server_count)
+    )
+    required_copies = (
+        configured_required_copies if enabled_server_count else 0
+    )
+    if enabled_server_count and (
         required_copies < 1 or required_copies > enabled_server_count
     ):
         raise ValueError(

@@ -73,6 +73,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-client-exe-m
 dist\FileBackupClient.exe
 ```
 
+不再分发 `FileBackupClientAgent.exe`；定时备份Agent已包含在同一个Client EXE中。
+
 每台电脑首次启动后配置：
 
 - Server URL
@@ -84,7 +86,9 @@ dist\FileBackupClient.exe
 
 Client 的定时器只在 Client 程序运行时生效：
 
-- 窗口最小化到托盘：继续运行
+- Client 启动后托盘图标会持续显示；点击关闭按钮会隐藏窗口并继续运行
+- 双击托盘图标或选择“打开窗口”：重新显示窗口
+- 托盘菜单选择“退出程序”：真正退出，不再运行定时器
 - 退出程序：不会运行
 - 电脑关机或睡眠：不会运行
 
@@ -93,3 +97,5 @@ Client 的定时器只在 Client 程序运行时生效：
 ```text
 shell:startup
 ```
+
+Server Manager 同样常驻托盘。注意：托盘图标表示管理器程序正在运行；Server 后台服务是否在线应以管理器“总览”中的健康状态为准。

@@ -50,7 +50,7 @@ def test_verify_restore_and_rollback(tmp_path: Path) -> None:
     task_root = tmp_path / "task"
     make_task_files(task_root)
     config = load_config(write_config(tmp_path, task_root))
-    prepared = prepare_backup(config, config.get_task("daily_documents"))
+    prepared = prepare_backup(config, config.get_task("documents_backup"))
     bundle = prepared.bundle_path.read_bytes()
     server_client = BackupServerClient(
         ServerSection("https://backup.example.test", "token-01"),
@@ -89,7 +89,7 @@ def test_auto_verify_falls_back_and_explicit_server_can_be_selected(tmp_path: Pa
     task_root = tmp_path / "task"
     make_task_files(task_root)
     config = load_config(write_dual_server_config(tmp_path, task_root))
-    prepared = prepare_backup(config, config.get_task("daily_documents"))
+    prepared = prepare_backup(config, config.get_task("documents_backup"))
     bundle = prepared.bundle_path.read_bytes()
     clients = {
         "server-a": BackupServerClient(

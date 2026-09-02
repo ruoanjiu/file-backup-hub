@@ -10,11 +10,11 @@ from server.app.auth import Actor, get_current_actor
 from server.app.config import Settings, get_settings
 from server.app.database import get_db
 from server.app.services.transfer_service import (
+    SERVER_RECEIVER_ID,
     get_transfer_for_actor,
     init_transfer,
     list_inbox,
     receive_transfer_on_server,
-    SERVER_RECEIVER_ID,
     set_transfer_status,
     transfer_to_item,
 )
@@ -43,6 +43,22 @@ def inbox(
     actor: Actor = Depends(get_current_actor),
 ) -> TransferListResponse:
     return list_inbox(db, actor, limit)
+
+
+@router.get("/server-inbox", response_model=TransferListResponse)
+def server_inbox(
+    limit: int = Query(default=100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+) -> TransferListResponse:
+    if not actor.is_admin:
+        raise HTTPException(status_code=403, detail="Admin token required")
+    return list_inbox(
+        db,
+        actor,
+        limit,
+        receiver_device_id=SERVER_RECEIVER_ID,
+    )
 
 
 @router.put("/{transfer_id}/bundle", response_model=TransferItem)
@@ -154,7 +170,7 @@ def reject_transfer(
     return transfer_to_item(set_transfer_status(db, transfer, actor, "REJECTED"))
 
 
-@router.post("/{transfer_id}/receive-on-server")
+@router.post("/{transfer_id}/server-receive")
 def receive_on_server(
     transfer_id: str,
     db: Session = Depends(get_db),
@@ -162,18 +178,13 @@ def receive_on_server(
     settings: Settings = Depends(get_settings),
 ) -> dict:
     transfer = get_transfer_for_actor(db, transfer_id, actor)
-    completed, destination, received_count = receive_transfer_on_server(
+    received, destination = receive_transfer_on_server(
         db,
         transfer,
         actor,
         settings,
     )
     return {
-        "transfer_id": completed.transfer_id,
-        "receiver_device_id": SERVER_RECEIVER_ID,
-        "status": completed.status,
-        "received_count": received_count,
-        "destination": str(destination),
-        "source_files_deleted": False,
-        "transfer_bundle_deleted": False,
+        **transfer_to_item(received).model_dump(mode="json"),
+        "destination_path": str(destination),
     }

@@ -6,7 +6,12 @@ import tarfile
 from pathlib import Path
 
 from client.app.config import load_config
-from client.app.transfer import prepare_transfer, receive_transfer, reject_transfer, send_transfer
+from client.app.transfer import (
+    prepare_transfer,
+    receive_transfer,
+    reject_transfer,
+    send_transfer,
+)
 from client.app.utils.hashing import calculate_sha256
 from client.tests.test_client_backup import write_config
 
@@ -30,7 +35,6 @@ class FakeTransferClient:
             "transfer_id": transfer_id,
             "status": "AVAILABLE",
             "bundle_sha256": calculate_sha256(self.bundle_path),
-            "receiver_device_id": self.manifest["receiver_device_id"],
         }
 
     def download_transfer_manifest(self, transfer_id: str) -> dict:
@@ -39,7 +43,12 @@ class FakeTransferClient:
 
     def update_transfer_status(self, transfer_id: str, action: str) -> dict:
         self.actions.append(action)
-        return {"transfer_id": transfer_id, "status": action.upper()}
+        statuses = {
+            "accept": "ACCEPTED",
+            "complete": "COMPLETED",
+            "reject": "REJECTED",
+        }
+        return {"transfer_id": transfer_id, "status": statuses[action]}
 
     def download_transfer_bundle(self, transfer_id: str, destination: Path) -> Path:
         assert self.bundle_path is not None
@@ -126,29 +135,29 @@ def test_prepare_send_and_receive_transfer_without_changing_sources(tmp_path: Pa
     assert {path: calculate_sha256(path) for path in source_hashes} == source_hashes
 
 
-def test_reject_transfer_changes_status_without_deleting_source(tmp_path: Path) -> None:
+def test_transfer_can_target_server_and_receiver_can_reject(tmp_path: Path) -> None:
     send_root = tmp_path / "send-root"
     send_root.mkdir()
-    source = send_root / "keep.txt"
-    source.write_text("keep me", encoding="utf-8")
-    _, receiver_config = make_transfer_config(tmp_path, "receiver-pc")
-    fake = FakeTransferClient(
-        manifest={
-            "transfer_id": "transfer_reject_demo",
-            "receiver_device_id": "receiver-pc",
-        },
-        bundle_path=source,
-    )
+    (send_root / "server.txt").write_text("to server", encoding="utf-8")
+    _, config = make_transfer_config(tmp_path, "sender-pc")
+    fake = FakeTransferClient()
 
-    result = reject_transfer(
-        receiver_config,
-        "transfer_reject_demo",
+    sent = send_transfer(
+        config,
+        [send_root / "server.txt"],
+        "__server__",
+        server_id="server-1",
+        server_clients={"server-1": fake},
+        cleanup=False,
+    )
+    assert sent.status == "AVAILABLE"
+    assert fake.manifest["receiver_device_id"] == "__server__"
+
+    rejected = reject_transfer(
+        config,
+        str(fake.manifest["transfer_id"]),
         server_id="server-1",
         server_client=fake,
     )
-
-    assert result["status"] == "REJECT"
-    assert result["source_files_deleted"] is False
-    assert result["transfer_bundle_deleted"] is False
+    assert rejected["status"] == "REJECTED"
     assert fake.actions == ["reject"]
-    assert source.read_text(encoding="utf-8") == "keep me"

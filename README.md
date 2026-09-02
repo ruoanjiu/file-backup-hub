@@ -4,6 +4,10 @@ File Backup Hub 是一个面向 Windows 与 macOS 的多 Server 文件备份与�
 
 桌面前端采用 Vue 3 + TypeScript + Vite，使用 pywebview 嵌入 Windows WebView2/macOS WKWebView。Node.js 仅用于构建前端，用户运行 App 时不需要安装 Node；备份、配对、文件传送和恢复仍由 Python 核心执行。
 
+## 下载
+
+可在 [GitHub Releases](https://github.com/ruoanjiu/file-backup-hub/releases) 下载 Windows 10/11 x64 和 macOS Apple Silicon 安装包。二进制文件不直接提交到 Git，每个发布版本均提供 SHA256 校验值。
+
 ## 当前安全边界
 
 - 日常备份 Agent 只读取和复制源文件，不删除、移动、重命名或修改源文件。
@@ -13,19 +17,15 @@ File Backup Hub 是一个面向 Windows 与 macOS 的多 Server 文件备份与�
 - 恢复是用户手动操作，恢复前校验备份并创建 rollback 快照。
 - 文件传送由发送者选择本机源文件、接收者选择本机保存目录；发送者不能指定对方绝对路径。
 - 收到同名内容时自动生成新名称，不覆盖已有文件。
-- 设备移除采用“解除配对/撤销授权”：只停用 Token 并保留设备历史，不删除 Client 原始文件或 Server 历史备份。
 
 ## 设备配对与文件传送
 
 - Server Manager 可生成五分钟有效、只能使用一次的六位配对码和二维码。
 - 配对后的设备获得独立动态 Token；显示名称可修改，内部 `device_id` 不变。
-- Server 管理员可软撤销设备，旧 Token 立即失效；同一 `device_id` 可用新的六位码重新配对。
-- 已停用的设备可进一步“移除记录”使卡片从列表消失；该操作只删除设备登记，不删除任何备份、Manifest、传输文件或 Client 原始文件。
-- Client 可退出最后一台 Server；此时备份会明确失败而不会误报成功，用户可重新配对、删除本地 Server 配置或添加新 Server。
 - Client 与 Server App 使用统一设备列表。
 - 当前文件传送采用 Server 中转，可在局域网或 HTTPS/Tailscale 网络中使用。
-- Client 接收目标可选其他设备或“当前 Server”；Server Manager 的接收页校验后保存到 `transfers/server-inbox/<transfer_id>/`。
-- Client 和 Server 均可拒绝待接收内容；拒绝后不再显示于待处理列表，发送方原文件和 Server 中转包均保留。
+- 发送目标既可以是其他 Client，也可以是所选 Server；发给 Server 的内容由管理员在 Server Manager“接收”页接收并保存到 `transfers/server-inbox/<transfer_id>/`。
+- Client 和 Server 都可以拒绝待接收传送；拒绝后项目会从待接收列表消失，但不会删除发送方原文件，也不会改动正式备份。
 - 发送和接收都校验整包 SHA256、manifest 与逐文件 SHA256。
 - 中转内容存放在独立 `transfers/` 目录，不进入正式备份目录。
 
@@ -102,14 +102,20 @@ docker compose up --build -d file-backup-server
 python run_server_app.py
 ```
 
-Server Manager 启动的是独立后台进程。macOS Server App 会在启动时自动启动 Server，并在系统菜单栏常驻软件图标；菜单中可查看运行状态、打开管理界面、启动或停止 Server。关闭管理窗口只会隐藏窗口，不会停止 Server 或退出菜单栏。默认数据目录为：
-
-Server 界面的存储卡片可直接在 Finder/Windows 资源管理器中打开受管目录。顶部铃铛是应用内通知，用于显示待接收文件、Server 离线等需要处理的状态。
-
-Server 设置页可修改 Server ID 和数据目录。保存前会校验 ID、绝对路径、根目录、文件路径和写入权限，并备份当前配置；Server 正在运行时会安全停止后重启，失败则自动恢复旧配置。切换数据目录不会自动迁移或删除旧数据。
+Server Manager 启动的是独立后台进程；点击关闭按钮会把管理窗口隐藏到 Windows 托盘，不会停止 Server。Server 和 Client 的托盘菜单都可以重新打开窗口或真正退出程序。Server“存储”页的四张目录卡片可以直接在资源管理器中打开对应目录，右上角铃铛用于显示服务离线、待接收传送和异常备份副本等状态提醒。默认数据目录为：
 
 - Windows：`C:\ProgramData\FileBackupServer`
 - macOS：`/Users/Shared/FileBackupServer`
+
+Server Manager 的“设置”页可以修改 Server ID 和数据目录，并可使用原生目录选择器。保存时，正在运行的 Server 会自动停止并按新配置启动。修改数据目录只影响后续读写，不会自动迁移旧目录中的数据库、备份包或中转文件；修改 Server ID 后，已有 Client 可能需要更新配置或重新配对。
+
+新建桌面 Server 默认不再生成 `client-1` 静态兼容授权。设备应使用 Server Manager 生成的六位一次性配对码加入；已有配置中手工设置的兼容 Token 仍可继续使用，升级 EXE 不会自动撤销。
+
+Server 管理员可以在“设备与配对”页撤销已配对设备。撤销采用软停用：只把设备标记为 `enabled=false`，旧 Token 立即失效，但不会删除 Client 行、原始文件、历史备份、Manifest、Transfer 或 Trash。已停用设备可使用新的六位配对码重新配对同一个 Device ID，并获得新 Token。Client 也可在“设置”中退出指定 Server；Server 确认自撤销后，本机只清空该 Server Token 并禁用该连接，其他 Server、任务和本地备份不变。退出成功后可以进一步删除本机的 Server 配置；即使删除最后一条 Server，任务和本地备份仍会保留，并可通过“添加 Server”重新加入。
+
+已停用设备还可由管理员执行“移除记录”，使卡片从设备列表消失。该操作只删除已停用的设备登记，历史备份和所有文件继续保留。
+
+如果 Client 调用自撤销时收到 HTTP 401/403，说明 Bearer Token 已失效或设备已被 Server 撤销。此时界面会再次确认是否“仅在本机退出”；只有用户二次确认后才清空本地 Token并禁用连接。网络超时和 Server 5xx 不会触发该兜底。
 
 ## App 构建
 
@@ -127,11 +133,12 @@ macOS：
 ./scripts/build-server-macos.sh
 ```
 
-Client 构建同时生成后台 Agent：Windows 为 `FileBackupClientAgent.exe`，macOS 为 `FileBackupClientAgent`。构建产物位于 `dist/`。当前 macOS 构建是本机 arm64、临时 ad-hoc 签名；正式分发前仍需 Developer ID 签名、公证和 DMG/PKG。Windows 正式分发前需要在 Windows x64 构建机验证并进行代码签名。
+Client 的定时备份 Agent 已作为 `FileBackupClient.exe --agent` 内置模式运行，不再生成或分发第二个 Agent 可执行文件。启动 Client 界面时会自动启动内置 Agent；关闭窗口到托盘不会停止自动备份，只有托盘“退出程序”才会同时停止 Agent。构建产物位于 `dist/`。当前 macOS 构建是本机 arm64、临时 ad-hoc 签名；正式分发前仍需 Developer ID 签名、公证和 DMG/PKG。Windows 正式分发前需要在 Windows x64 构建机验证并进行代码签名。
 
-macOS Client 和 Server 均具有菜单栏常驻图标；关闭窗口只隐藏管理界面。Client 管理器和独立 Agent 是两个进程，退出管理器不会代替 Agent 启停管理。
+Windows Client/Server 关闭窗口后驻留系统托盘；macOS Client/Server 关闭窗口后驻留系统菜单栏。
 
 构建脚本会先在 `frontend/` 执行 `npm ci && npm run build`，再把生成的静态资源与 Python/pywebview 一起打包。
+Windows `FileBackupClient.exe` 和 `FileBackupServer.exe` 都会内置Microsoft WebView2 Fixed Runtime x64，目标电脑无需另装Python、Node或WebView2；代价是两个图形界面单文件的体积和首次启动解压时间都会明显增加。
 
 ## 测试
 

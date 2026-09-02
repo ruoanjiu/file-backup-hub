@@ -82,6 +82,48 @@ def get_devices(
     return {"items": list_devices(db, settings)}
 
 
+@router.post("/devices/self/revoke")
+def revoke_current_device(
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+) -> dict:
+    if actor.is_admin or actor.machine_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="A paired device token is required",
+        )
+    client = revoke_device(
+        db,
+        actor,
+        machine_id=actor.machine_id,
+    )
+    return {
+        "device_id": client.machine_id,
+        "status": "REVOKED",
+        "enabled": bool(client.enabled),
+    }
+
+
+@router.post("/devices/{device_id}/revoke")
+def revoke_paired_device(
+    device_id: str,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+) -> dict:
+    client = revoke_device(
+        db,
+        actor,
+        machine_id=device_id,
+        admin_only=True,
+    )
+    return {
+        "device_id": client.machine_id,
+        "display_name": client.display_name,
+        "status": "REVOKED",
+        "enabled": bool(client.enabled),
+    }
+
+
 @router.patch("/devices/{device_id}")
 def update_device(
     device_id: str,
@@ -100,43 +142,6 @@ def update_device(
         "display_name": client.display_name,
         "enabled": bool(client.enabled),
         "last_seen_at": client.last_seen_at,
-    }
-
-
-@router.post("/devices/self/revoke")
-def revoke_current_device(
-    db: Session = Depends(get_db),
-    actor: Actor = Depends(get_current_actor),
-) -> dict:
-    if actor.is_admin or actor.machine_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="A Client token is required for self revocation",
-        )
-    client = revoke_device(
-        db,
-        actor,
-        machine_id=actor.machine_id,
-        allow_self=True,
-    )
-    return {
-        "device_id": client.machine_id,
-        "status": "REVOKED",
-        "backups_deleted": False,
-    }
-
-
-@router.post("/devices/{device_id}/revoke")
-def revoke_paired_device(
-    device_id: str,
-    db: Session = Depends(get_db),
-    actor: Actor = Depends(get_current_actor),
-) -> dict:
-    client = revoke_device(db, actor, machine_id=device_id)
-    return {
-        "device_id": client.machine_id,
-        "status": "REVOKED",
-        "backups_deleted": False,
     }
 
 

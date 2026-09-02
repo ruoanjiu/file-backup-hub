@@ -230,7 +230,7 @@ class FirstRunDialog(QDialog):
         self.setWindowTitle("首次设置 File Backup")
         self.resize(660, 520)
         hostname = re.sub(r"[^A-Za-z0-9_.-]", "-", socket.gethostname()).strip("-")
-        self.server_url = QLineEdit("http://192.168.1.100:8000")
+        self.server_url = QLineEdit("http://127.0.0.1:8000")
         self.server_id = QLineEdit("server-a")
         self.pairing_code = QLineEdit()
         self.pairing_code.setPlaceholderText("Server Manager 中生成的六位数字")

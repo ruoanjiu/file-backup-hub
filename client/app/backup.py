@@ -110,8 +110,6 @@ def run_backup_for_task(
     local_db: LocalDb | None = None,
     cleanup: bool = True,
 ) -> BackupResult:
-    if not config.enabled_servers():
-        raise ValueError("没有已启用的 Server；请先添加或重新配对 Server")
     created_at = now_for_config(config)
     backup_id = generate_backup_id(
         config.client.machine_id,
@@ -144,6 +142,8 @@ def run_backup_for_task(
             shutil.rmtree(copied_files_dir)
 
         enabled_servers = config.enabled_servers()
+        if not enabled_servers:
+            raise ValueError("没有已启用的 Server；请先重新配对后再运行备份")
         results: list[DestinationUploadResult] = []
         supplied_clients = dict(server_clients or {})
         if server_client is not None:
@@ -277,8 +277,6 @@ def retry_backup_destinations(
     server_clients: dict[str, BackupServerClient] | None = None,
     cleanup: bool = True,
 ) -> BackupResult:
-    if not config.enabled_servers():
-        raise ValueError("没有已启用的 Server；无法执行补传")
     db = local_db or LocalDb(config.client.data_dir / "client.sqlite")
     job = db.get_backup_job(backup_id)
     if job is None:
@@ -299,7 +297,10 @@ def retry_backup_destinations(
     }
     supplied_clients = dict(server_clients or {})
     results: list[DestinationUploadResult] = []
-    for server in config.enabled_servers():
+    enabled_servers = config.enabled_servers()
+    if not enabled_servers:
+        raise ValueError("没有已启用的 Server；无法补传 outbox")
+    for server in enabled_servers:
         existing = previous.get(server.id)
         if existing and existing["status"] == "COMPLETED":
             results.append(

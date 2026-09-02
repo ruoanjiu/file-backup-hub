@@ -50,6 +50,21 @@ class ReceiveTransferResult:
     error_message: str | None = None
 
 
+def reject_transfer(
+    config: AppConfig,
+    transfer_id: str,
+    *,
+    server_id: str,
+    server_client: BackupServerClient | None = None,
+) -> dict[str, Any]:
+    server = config.get_server(server_id)
+    client = server_client or BackupServerClient(server)
+    response = client.update_transfer_status(transfer_id, "reject")
+    if response.get("status") != "REJECTED":
+        raise RuntimeError(f"Unexpected reject status: {response.get('status')}")
+    return response
+
+
 def _reset_transfer_workdir(root: Path, transfer_id: str) -> Path:
     resolved_root = root.expanduser().resolve(strict=False)
     workdir = (resolved_root / transfer_id).resolve(strict=False)
@@ -318,23 +333,3 @@ def receive_transfer(
     finally:
         if workdir.exists():
             shutil.rmtree(workdir)
-
-
-def reject_transfer(
-    config: AppConfig,
-    transfer_id: str,
-    *,
-    server_id: str,
-    server_client: BackupServerClient | None = None,
-) -> dict[str, Any]:
-    server = config.get_server(server_id)
-    client = server_client or BackupServerClient(server)
-    metadata = client.get_transfer_metadata(transfer_id)
-    if metadata.get("receiver_device_id") != config.client.machine_id:
-        raise ValueError("Transfer receiver does not match this device")
-    response = client.update_transfer_status(transfer_id, "reject")
-    return {
-        **response,
-        "source_files_deleted": False,
-        "transfer_bundle_deleted": False,
-    }

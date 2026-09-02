@@ -2,19 +2,17 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
 import subprocess
 import sys
-import time
 import json
 import urllib.request
 from dataclasses import replace
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import webview
 
+from desktop_tray import DesktopTrayController
 from server.app.runtime import (
     ServerRuntimeConfig,
     default_server_config_path,
@@ -24,9 +22,10 @@ from server.app.runtime import (
     save_runtime_config,
     stop_server_process,
 )
+from server.app.webview_runtime import configure_bundled_webview2_runtime
 
 
-SAFE_SERVER_ID = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
+SERVER_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 
 
 def api_request(
@@ -74,94 +73,10 @@ def format_size(value: int) -> str:
     return f"{value} B"
 
 
-def storage_directories(config: ServerRuntimeConfig) -> dict[str, Path]:
-    return {
-        "storage": config.data_dir / "storage",
-        "manifests": config.data_dir / "manifests",
-        "transfers": config.data_dir / "transfers",
-        "trash": config.data_dir / "trash",
-    }
-
-
-def resolve_storage_directory(config: ServerRuntimeConfig, requested_path: str) -> Path:
-    requested = Path(requested_path).expanduser().resolve()
-    allowed = {path.resolve() for path in storage_directories(config).values()}
-    if requested not in allowed:
-        raise ValueError("Only managed Server storage directories may be opened")
-    return requested
-
-
-def open_directory(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True)
-    if os.name == "nt":
-        os.startfile(path)  # type: ignore[attr-defined]
-    elif sys.platform == "darwin":
-        subprocess.Popen(["open", str(path)])
-    else:
-        subprocess.Popen(["xdg-open", str(path)])
-
-
-def validate_server_id(server_id: str) -> str:
-    value = server_id.strip()
-    if not SAFE_SERVER_ID.fullmatch(value):
-        raise ValueError(
-            "Server ID must contain only letters, numbers, dot, underscore and hyphen"
-        )
-    return value
-
-
-def validate_server_data_dir(raw_path: str) -> Path:
-    value = raw_path.strip()
-    if not value:
-        raise ValueError("Server data directory is required")
-    path = Path(value).expanduser()
-    if not path.is_absolute():
-        raise ValueError("Server data directory must be an absolute path")
-    path = path.resolve()
-    anchor = Path(path.anchor)
-    if path == anchor:
-        raise ValueError("A disk or filesystem root cannot be used as the data directory")
-    if path.exists() and not path.is_dir():
-        raise ValueError("Server data directory points to a file")
-    parent = path
-    while not parent.exists() and parent != parent.parent:
-        parent = parent.parent
-    if not parent.exists() or not os.access(parent, os.W_OK):
-        raise ValueError("Server data directory is not writable")
-    return path
-
-
-def backup_runtime_config(config_path: Path) -> Path:
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-    backup_dir = config_path.parent / "backups"
-    backup_dir.mkdir(parents=True, exist_ok=True)
-    backup_path = backup_dir / f"{config_path.stem}-before-settings-{timestamp}.json"
-    shutil.copy2(config_path, backup_path)
-    if os.name != "nt":
-        backup_path.chmod(0o600)
-    return backup_path
-
-
-def wait_for_server_health(
-    config: ServerRuntimeConfig,
-    *,
-    running: bool,
-    timeout: float = 30,
-) -> bool:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        health = read_health(config, timeout=0.5)
-        matches = bool(health and health.get("server_id") == config.server_id)
-        if matches is running:
-            return True
-        time.sleep(0.2)
-    return False
-
-
 class ServerDesktopApi:
     def __init__(self, config_path: Path | None = None) -> None:
         self.config_path = config_path or default_server_config_path()
-        self.window: Any | None = None
+        self._window: Any | None = None
         if self.config_path.exists():
             self.config = load_runtime_config(self.config_path)
         else:
@@ -171,7 +86,7 @@ class ServerDesktopApi:
     def bootstrap(self) -> dict[str, Any]:
         health = read_health(self.config, timeout=0.5)
         devices: list[dict[str, Any]] = []
-        inbox: list[dict[str, Any]] = []
+        server_inbox: list[dict[str, Any]] = []
         if health:
             try:
                 devices = api_request(
@@ -182,13 +97,13 @@ class ServerDesktopApi:
             except Exception:
                 devices = []
             try:
-                inbox = api_request(
+                server_inbox = api_request(
                     self.config,
-                    "/api/v1/transfers/inbox?limit=100",
+                    "/api/v1/transfers/server-inbox",
                     token=self.config.admin_token,
                 ).get("items", [])
             except Exception:
-                inbox = []
+                server_inbox = []
         storage = []
         for key, name in [
             ("storage", "备份包"),
@@ -196,7 +111,7 @@ class ServerDesktopApi:
             ("transfers", "文件中转"),
             ("trash", "Trash"),
         ]:
-            path = storage_directories(self.config)[key]
+            path = self.config.data_dir / key
             storage.append(
                 {"name": name, "path": str(path), "size": format_size(directory_size(path))}
             )
@@ -210,8 +125,104 @@ class ServerDesktopApi:
                 "data_dir": str(self.config.data_dir),
             },
             "devices": devices,
-            "inbox": inbox,
+            "server_inbox": server_inbox,
+            "server_inbox_dir": str(
+                self.config.data_dir / "transfers" / "server-inbox"
+            ),
             "storage": storage,
+        }
+
+    def open_path(self, path: str) -> dict[str, Any]:
+        allowed = {
+            (self.config.data_dir / name).resolve()
+            for name in ("storage", "manifests", "transfers", "trash")
+        }
+        allowed.add(
+            (self.config.data_dir / "transfers" / "server-inbox").resolve()
+        )
+        target = Path(path).expanduser().resolve()
+        if target not in allowed:
+            raise ValueError("只能打开 File Backup Server 管理的存储目录")
+        target.mkdir(parents=True, exist_ok=True)
+        if os.name == "nt":
+            os.startfile(str(target))
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(target)])
+        else:
+            subprocess.Popen(["xdg-open", str(target)])
+        return {"opened": True, "path": str(target)}
+
+    def choose_server_data_dir(self, directory: str = "") -> list[str]:
+        if self._window is None:
+            return []
+        result = self._window.create_file_dialog(
+            webview.FileDialog.FOLDER,
+            directory=directory or "",
+        )
+        return [str(item) for item in (result or [])]
+
+    def save_server_settings(self, server_id: str, data_dir: str) -> dict[str, Any]:
+        normalized_id = server_id.strip()
+        if not SERVER_ID_PATTERN.fullmatch(normalized_id):
+            raise ValueError("Server ID 只能包含字母、数字、点、下划线和短横线")
+
+        raw_data_dir = data_dir.strip()
+        if not raw_data_dir:
+            raise ValueError("数据目录不能为空")
+        target_dir = Path(raw_data_dir).expanduser()
+        if not target_dir.is_absolute():
+            raise ValueError("数据目录必须使用绝对路径")
+        target_dir = target_dir.resolve()
+        if target_dir == Path(target_dir.anchor):
+            raise ValueError("不能直接使用磁盘根目录作为数据目录")
+        if target_dir.exists() and not target_dir.is_dir():
+            raise ValueError("数据目录指向了一个文件")
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        previous = self.config
+        updated = replace(
+            previous,
+            server_id=normalized_id,
+            data_dir=target_dir,
+        )
+        server_id_changed = updated.server_id != previous.server_id
+        data_dir_changed = updated.data_dir != previous.data_dir.resolve()
+        if not server_id_changed and not data_dir_changed:
+            return {
+                "status": "UNCHANGED",
+                "server_id": updated.server_id,
+                "data_dir": str(updated.data_dir),
+                "restarted": False,
+            }
+
+        health = read_health(previous)
+        was_running = bool(
+            health and health.get("server_id") == previous.server_id
+        )
+        if was_running and not stop_server_process(previous):
+            raise RuntimeError("无法停止当前 Server，配置未保存")
+
+        try:
+            save_runtime_config(self.config_path, updated)
+            self.config = updated
+        except Exception:
+            self.config = previous
+            if was_running:
+                self.start_server()
+            raise
+
+        restart_status = "NOT_RUNNING"
+        if was_running:
+            restart_status = self.start_server()["status"]
+        return {
+            "status": "RESTARTING" if was_running else "SAVED",
+            "server_id": updated.server_id,
+            "data_dir": str(updated.data_dir),
+            "server_id_changed": server_id_changed,
+            "data_dir_changed": data_dir_changed,
+            "old_data_dir": str(previous.data_dir),
+            "restarted": was_running,
+            "restart_status": restart_status,
         }
 
     def start_server(self) -> dict[str, str]:
@@ -220,7 +231,7 @@ class ServerDesktopApi:
             return {"status": "RUNNING"}
         if health:
             raise RuntimeError(
-                f"Port {self.config.port} is already used by another File Backup Server"
+                f"端口 {self.config.port} 已被另一个 Server 占用"
             )
         if getattr(sys, "frozen", False):
             command = [sys.executable, "--headless", "--config", str(self.config_path)]
@@ -252,88 +263,6 @@ class ServerDesktopApi:
 
     def stop_server(self) -> dict[str, str]:
         return {"status": "STOPPING" if stop_server_process(self.config) else "NOT_RUNNING"}
-
-    def open_storage_path(self, requested_path: str) -> dict[str, str]:
-        path = resolve_storage_directory(self.config, requested_path)
-        open_directory(path)
-        return {"status": "OPENED", "path": str(path)}
-
-    def choose_server_data_dir(self, current_path: str = "") -> list[str]:
-        if self.window is None:
-            return []
-        result = self.window.create_file_dialog(
-            webview.FileDialog.FOLDER,
-            directory=current_path or str(self.config.data_dir),
-        )
-        return [str(item) for item in (result or [])]
-
-    def save_server_settings(self, server_id: str, data_dir: str) -> dict[str, Any]:
-        new_server_id = validate_server_id(server_id)
-        new_data_dir = validate_server_data_dir(data_dir)
-        old_config = self.config
-        if (
-            new_server_id == old_config.server_id
-            and new_data_dir == old_config.data_dir.resolve()
-        ):
-            return {
-                "status": "UNCHANGED",
-                "server_id": old_config.server_id,
-                "data_dir": str(old_config.data_dir),
-                "restarted": False,
-            }
-
-        health = read_health(old_config)
-        if health and health.get("server_id") != old_config.server_id:
-            raise RuntimeError(
-                f"Port {old_config.port} is already used by another File Backup Server"
-            )
-        was_running = bool(health)
-        if was_running:
-            if not stop_server_process(old_config):
-                raise RuntimeError("Unable to stop the current Server safely")
-            if not wait_for_server_health(old_config, running=False, timeout=15):
-                raise RuntimeError("Timed out while stopping the current Server")
-
-        new_config = replace(
-            old_config,
-            server_id=new_server_id,
-            data_dir=new_data_dir,
-        )
-        backup_path: Path | None = None
-        try:
-            backup_path = backup_runtime_config(self.config_path)
-            save_runtime_config(self.config_path, new_config)
-            self.config = new_config
-            if was_running:
-                self.start_server()
-                if not wait_for_server_health(new_config, running=True):
-                    raise RuntimeError("The Server did not start with the new settings")
-        except Exception as error:
-            save_runtime_config(self.config_path, old_config)
-            self.config = old_config
-            recovery_error: Exception | None = None
-            if was_running and not read_health(old_config):
-                try:
-                    self.start_server()
-                    if not wait_for_server_health(old_config, running=True):
-                        raise RuntimeError("The previous Server settings could not be restarted")
-                except Exception as recovery:
-                    recovery_error = recovery
-            if recovery_error:
-                raise RuntimeError(
-                    f"Settings failed and automatic recovery also failed: {recovery_error}"
-                ) from error
-            raise RuntimeError(
-                f"Settings were not applied; the previous configuration was restored: {error}"
-            ) from error
-
-        return {
-            "status": "UPDATED",
-            "server_id": new_config.server_id,
-            "data_dir": str(new_config.data_dir),
-            "restarted": was_running,
-            "config_backup": str(backup_path) if backup_path else "",
-        }
 
     def create_pairing_code(self) -> dict[str, Any]:
         return api_request(
@@ -372,23 +301,18 @@ class ServerDesktopApi:
     def receive_server_transfer(self, transfer_id: str) -> dict[str, Any]:
         return api_request(
             self.config,
-            f"/api/v1/transfers/{transfer_id}/receive-on-server",
+            f"/api/v1/transfers/{transfer_id}/server-receive",
             method="POST",
             token=self.config.admin_token,
         )
 
-    def reject_server_transfer(self, transfer_id: str) -> dict[str, Any]:
-        response = api_request(
+    def reject_transfer(self, transfer_id: str) -> dict[str, Any]:
+        return api_request(
             self.config,
             f"/api/v1/transfers/{transfer_id}/reject",
             method="POST",
             token=self.config.admin_token,
         )
-        return {
-            **response,
-            "source_files_deleted": False,
-            "transfer_bundle_deleted": False,
-        }
 
 
 def run_server_webview(config_path: Path | None = None) -> None:
@@ -396,21 +320,35 @@ def run_server_webview(config_path: Path | None = None) -> None:
     if not index.exists():
         raise FileNotFoundError(f"Vue frontend has not been built: {index}")
     api = ServerDesktopApi(config_path)
+    if os.name == "nt":
+        configure_bundled_webview2_runtime()
     window = webview.create_window(
         "File Backup Server",
-        index.as_uri() + "?mode=server",
+        index.as_uri(),
         js_api=api,
         width=1240,
         height=780,
         min_size=(980, 680),
         background_color="#f3f5f8",
     )
-    api.window = window
+    api._window = window
     if sys.platform == "darwin":
         from server.app.macos_menu_bar import MacOSServerMenuBar
 
         menu_bar = MacOSServerMenuBar(window, api)
         window.events.closing += menu_bar.handle_window_closing
         webview.start(menu_bar.install, debug=False)
+    elif os.name == "nt":
+        tray = DesktopTrayController(
+            window,
+            name="FileBackupServer",
+            title="File Backup Server 管理器正在运行",
+            icon_path=index.parent / "app-icon.png",
+        )
+        tray.start()
+        try:
+            webview.start(debug=False)
+        finally:
+            tray.stop()
     else:
         webview.start(debug=False)

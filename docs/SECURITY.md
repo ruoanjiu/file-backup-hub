@@ -28,6 +28,16 @@ Server 使用 Bearer Token：
 - 不要复用 admin token 和 client token
 - token 泄露后立即轮换
 
+## 设备撤销
+
+- 管理员撤销和 Client 自行退出均为软撤销，只更新配对设备的 `enabled` 状态；
+- 已撤销设备的旧 Token 会立即鉴权失败；
+- 不删除 Client 数据库行，也不删除备份、Manifest、Transfer、Trash 或任何原始文件；
+- 已停用的同一 Device ID 可以使用新的六位一次性配对码重新启用，新 Token 会替换旧 Token 哈希；
+- Client 只有在 Server 明确返回撤销成功后，才会清空本地对应 Server Token 并禁用该连接。
+- 已退出且 Token 已清空的 Server 可以从 Client 本地配置中删除；该操作不会再次调用远端删除，也不会删除 Server 上的停用设备记录或任何历史数据。
+- 自撤销返回 401/403 时，Client 可以在明确二次确认后仅执行本地退出；其他网络或 Server 错误不会自动清空 Token。
+
 ## 网络暴露
 
 不建议直接将 `8000` 暴露到公网。正式部署建议：

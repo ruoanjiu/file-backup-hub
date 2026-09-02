@@ -39,17 +39,17 @@ def sample_manifest(backup_id: str, machine_id: str = "office-pc-01") -> dict:
         "schema_version": "1.0",
         "backup_id": backup_id,
         "machine_id": machine_id,
-        "task_name": "daily_documents",
+        "task_name": "documents_backup",
         "created_at": "2026-04-30T04:00:00+08:00",
         "timezone": "Asia/Shanghai",
         "archive_format": "tar.gz",
         "file_count": 1,
         "total_size": 11,
-        "roots": ["D:/BackupData/daily_documents/logs"],
+        "roots": ["D:/BackupData/documents_backup/logs"],
         "files": [
             {
                 "file_id": "000001",
-                "original_path": "D:/BackupData/daily_documents/logs/a.log",
+                "original_path": "D:/BackupData/documents_backup/logs/a.log",
                 "backup_path": "files/000001.log",
                 "file_name": "a.log",
                 "file_type": "log",
@@ -104,7 +104,7 @@ def test_health_works_without_auth(tmp_path: Path) -> None:
 
 
 def test_backup_init_upload_list_manifest_and_download(tmp_path: Path) -> None:
-    backup_id = "office-pc-01__daily_documents__20260430_040000__a1b2c3d4"
+    backup_id = "office-pc-01__documents_backup__20260430_040000__a1b2c3d4"
     manifest = sample_manifest(backup_id)
     bundle = make_bundle(manifest)
 
@@ -126,7 +126,7 @@ def test_backup_init_upload_list_manifest_and_download(tmp_path: Path) -> None:
         assert upload_response.json()["status"] == "COMPLETED"
 
         list_response = client.get(
-            "/api/v1/backups?machine_id=office-pc-01&task_name=daily_documents",
+            "/api/v1/backups?machine_id=office-pc-01&task_name=documents_backup",
             headers=auth("token-01"),
         )
         assert list_response.status_code == 200
@@ -169,13 +169,13 @@ def test_backup_init_upload_list_manifest_and_download(tmp_path: Path) -> None:
         assert delete_response.status_code == 200
         assert delete_response.json()["status"] == "DELETED"
 
-        trash_bundle = tmp_path / "trash" / "storage" / "office-pc-01" / "daily_documents" / backup_id / "bundle.tar.gz"
-        trash_manifest = tmp_path / "trash" / "manifests" / "office-pc-01" / "daily_documents" / backup_id / "manifest.json"
+        trash_bundle = tmp_path / "trash" / "storage" / "office-pc-01" / "documents_backup" / backup_id / "bundle.tar.gz"
+        trash_manifest = tmp_path / "trash" / "manifests" / "office-pc-01" / "documents_backup" / backup_id / "manifest.json"
         assert trash_bundle.read_bytes() == bundle
         assert json.loads(trash_manifest.read_text(encoding="utf-8"))["backup_id"] == backup_id
 
         list_after_delete = client.get(
-            "/api/v1/backups?machine_id=office-pc-01&task_name=daily_documents",
+            "/api/v1/backups?machine_id=office-pc-01&task_name=documents_backup",
             headers=auth("token-01"),
         )
         assert list_after_delete.status_code == 200
@@ -183,7 +183,7 @@ def test_backup_init_upload_list_manifest_and_download(tmp_path: Path) -> None:
 
 
 def test_client_cannot_access_another_machine(tmp_path: Path) -> None:
-    backup_id = "office-pc-01__daily_documents__20260430_040000__a1b2c3d4"
+    backup_id = "office-pc-01__documents_backup__20260430_040000__a1b2c3d4"
     manifest = sample_manifest(backup_id)
     bundle = make_bundle(manifest)
 
@@ -203,7 +203,7 @@ def test_client_cannot_access_another_machine(tmp_path: Path) -> None:
 
 
 def test_upload_rejects_sha256_mismatch(tmp_path: Path) -> None:
-    backup_id = "office-pc-01__daily_documents__20260430_040000__a1b2c3d4"
+    backup_id = "office-pc-01__documents_backup__20260430_040000__a1b2c3d4"
     manifest = sample_manifest(backup_id)
     bundle = make_bundle(manifest)
 

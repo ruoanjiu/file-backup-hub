@@ -128,7 +128,7 @@ def stop_server_process(config: ServerRuntimeConfig) -> bool:
         return False
     if os.name == "nt":
         completed = subprocess.run(
-            ["taskkill", "/PID", str(pid), "/T"],
+            ["taskkill", "/PID", str(pid), "/T", "/F"],
             check=False,
             capture_output=True,
             text=True,

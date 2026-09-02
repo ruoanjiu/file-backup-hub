@@ -41,7 +41,7 @@ restore:
     - "{task_root.as_posix()}"
 
 tasks:
-  - name: "daily_documents"
+  - name: "documents_backup"
     enabled: true
     roots:
       - path: "{task_root.as_posix()}"
@@ -113,7 +113,7 @@ def test_load_config_and_scan_files(tmp_path: Path) -> None:
     assert config.client.machine_id == "office-pc-01"
     assert config.server.token == "token-01"
 
-    files = scan_task_files(config.get_task("daily_documents"), config.backup)
+    files = scan_task_files(config.get_task("documents_backup"), config.backup)
     names = sorted(path.path.name for path in files)
     assert names == ["a.log", "nav.xlsx", "state.json"]
 
@@ -129,7 +129,7 @@ def test_config_supports_single_file_source_and_schedule(tmp_path: Path) -> None
     config_path.write_text(raw, encoding="utf-8")
 
     config = load_config(config_path)
-    task = config.get_task("daily_documents")
+    task = config.get_task("documents_backup")
     assert task.schedule_enabled is True
     assert task.schedule_time == "05:30"
 
@@ -143,13 +143,13 @@ def test_prepare_backup_creates_manifest_and_bundle(tmp_path: Path) -> None:
     config = load_config(write_config(tmp_path, task_root))
     created_at = datetime(2026, 4, 30, 4, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
 
-    prepared = prepare_backup(config, config.get_task("daily_documents"), created_at)
+    prepared = prepare_backup(config, config.get_task("documents_backup"), created_at)
 
     assert prepared.file_count == 3
     assert prepared.total_size > 0
     assert prepared.bundle_path.exists()
     assert len(prepared.bundle_sha256) == 64
-    assert prepared.manifest["backup_id"].startswith("office-pc-01__daily_documents__20260430_040000__")
+    assert prepared.manifest["backup_id"].startswith("office-pc-01__documents_backup__20260430_040000__")
 
     with tarfile.open(prepared.bundle_path, "r:gz") as tar:
         names = sorted(tar.getnames())
@@ -170,9 +170,9 @@ def test_uploader_sends_init_then_bundle(tmp_path: Path) -> None:
     bundle_path = tmp_path / "bundle.tar.gz"
     bundle_path.write_bytes(b"bundle")
     manifest = {
-        "backup_id": "office-pc-01__daily_documents__20260430_040000__a1b2c3d4",
+        "backup_id": "office-pc-01__documents_backup__20260430_040000__a1b2c3d4",
         "machine_id": "office-pc-01",
-        "task_name": "daily_documents",
+        "task_name": "documents_backup",
         "created_at": "2026-04-30T04:00:00+08:00",
         "file_count": 0,
         "total_size": 0,
@@ -239,7 +239,7 @@ def test_run_backup_records_local_db(tmp_path: Path) -> None:
     )
     result = run_backup_for_task(
         config,
-        config.get_task("daily_documents"),
+        config.get_task("documents_backup"),
         server_client=server_client,
         local_db=local_db,
     )
@@ -289,7 +289,7 @@ def test_dual_server_backup_keeps_sources_and_retries_missing_copy(tmp_path: Pat
     }
     result = run_backup_for_task(
         config,
-        config.get_task("daily_documents"),
+        config.get_task("documents_backup"),
         server_clients=clients,
         local_db=local_db,
     )

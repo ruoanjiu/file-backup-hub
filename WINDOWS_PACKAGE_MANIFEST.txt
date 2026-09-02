@@ -3,9 +3,11 @@ Package date: 2026-08-29
 
 Expected Windows outputs:
   dist\FileBackupClient.exe
-  dist\FileBackupClientAgent.exe
   dist\FileBackupServer.exe
   dist\SHA256SUMS.txt
+
+The scheduled backup Agent runs as the embedded
+FileBackupClient.exe --agent mode and is not distributed separately.
 
 One-click entry:
   BUILD_WINDOWS.cmd

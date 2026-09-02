@@ -5,13 +5,24 @@ Set-Location $root
 
 Write-Host "Checking Windows build prerequisites..." -ForegroundColor Cyan
 
-$python = (py -3.11 -c "import platform,sys; print(sys.executable); print(platform.architecture()[0])" 2>$null)
-if (-not $python -or $python.Count -lt 2) {
-  throw "Python 3.11 x64 and the Python Launcher (py.exe) are required."
+$python311 = $env:FILEBACKUP_PYTHON311
+if (-not $python311 -or -not (Test-Path -LiteralPath $python311)) {
+  $pyLauncher = Get-Command py.exe -ErrorAction SilentlyContinue
+  if ($pyLauncher) {
+    $python311 = (& $pyLauncher.Source -3.11 -c "import sys; print(sys.executable)" 2>$null)
+  }
+}
+if (-not $python311 -or -not (Test-Path -LiteralPath $python311)) {
+  throw "Python 3.11 x64 is required. Set FILEBACKUP_PYTHON311 to python.exe if py.exe is unavailable."
+}
+$python = (& $python311 -c "import platform,sys; print(sys.executable); print(platform.architecture()[0]); print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+if ($python.Count -lt 3 -or $python[2] -ne "3.11") {
+  throw "Python 3.11 is required. Detected: $($python[2])"
 }
 if ($python[1] -ne "64bit") {
   throw "Python 3.11 must be the x64 build. Detected: $($python[1])"
 }
+$env:FILEBACKUP_PYTHON311 = $python[0]
 
 $node = Get-Command node.exe -ErrorAction SilentlyContinue
 $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
@@ -23,7 +34,7 @@ Write-Host "Python: $($python[0])"
 Write-Host "Node: $(node --version)"
 Write-Host "npm: $(npm --version)"
 
-Write-Host "Building Client and background Agent..." -ForegroundColor Cyan
+Write-Host "Building Client with embedded Agent mode..." -ForegroundColor Cyan
 & (Join-Path $PSScriptRoot "build-client-exe-min.ps1")
 
 Write-Host "Building Server Manager and Server runtime..." -ForegroundColor Cyan
@@ -31,7 +42,6 @@ Write-Host "Building Server Manager and Server runtime..." -ForegroundColor Cyan
 
 $artifacts = @(
   (Join-Path $root "dist\FileBackupClient.exe"),
-  (Join-Path $root "dist\FileBackupClientAgent.exe"),
   (Join-Path $root "dist\FileBackupServer.exe")
 )
 

@@ -1,6 +1,6 @@
 client:
   machine_id: "office-pc-01"
-  display_name: "办公室电脑 A"
+  display_name: "办公电脑 A"
   timezone: "Asia/Shanghai"
   data_dir: "C:/ProgramData/FileBackupClient"
   temp_dir: "C:/ProgramData/FileBackupClient/tmp"
@@ -52,12 +52,12 @@ transfer:
   overwrite_existing: false
 
 tasks:
-  - name: "daily_documents"
+  - name: "documents_backup"
     enabled: true
     schedule_enabled: false
     schedule_time: "04:00"
     roots:
-      - path: "D:/BackupData/daily_documents/logs"
+      - path: "D:/BackupData/documents_backup/logs"
         source_type: "folder"
         recursive: true
         include:

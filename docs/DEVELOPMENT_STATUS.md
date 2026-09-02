@@ -14,20 +14,18 @@
 - Server 重复 init 对相同备份幂等，失败上传可以用同一 backup_id 重试。
 - 增加 macOS/Windows Client 和 Server 构建入口。
 - 增加独立后台 Server 进程及跨平台 Server Manager。
-- 增加独立 Client Agent、启动时 outbox 补传和滚动日志，并生成独立可执行文件。
+- 将 Client Agent 融入 `FileBackupClient` 同一可执行文件的 `--agent` 后台模式；支持自动启动、单实例、旧版独立Agent迁移、outbox补传、滚动日志和界面启停/重启控制。
 - 增加动态设备身份、六位一次性配对码、二维码、设备列表和设备改名。
 - 增加 Server 中转式文件传送、接收确认、独立 Inbox、同名防覆盖和三层 SHA256 校验。
+- 文件传送支持把当前 Server 作为接收目标；Server Manager 可将文件校验后保存到独立收件箱，Client 与 Server 均可拒绝待接收项目。
 - 完成 Vue 3 + TypeScript + Vite 前端，并通过浏览器页面切换、首次设置、Client/Server模式和控制台检查。
 - 按确认概念图重构为悬浮浅色导航轨，并重排 Client 总览页的 Server卡片、拖拽区、传输队列、设备栏和双备份时间线。
 - 使用 pywebview 将 Vue 前端与 Python核心桥接，macOS Client.app、Server.app 均已打包启动。
 - 完成真实 HTTP 端到端传送：上传、接收箱、接受、下载、逐文件校验和完成状态全部通过。
-- macOS Server App 增加菜单栏常驻图标、运行状态、打开/启动/停止操作，关闭窗口后继续后台运行。
-- 增加 Server 管理员撤销设备、Client 退出指定 Server、旧 Token 失效、已停用设备重新配对；整个流程不删除原始文件或历史备份。
-- 同步 Windows 新功能到 macOS：文件直接发送到 Server、Server 收件箱校验保存、Client/Server 拒绝、退出后删除本地 Server 配置、无 Server 状态下重新添加，以及 macOS Client 菜单栏常驻。
 
 ## 下一阶段
 
-- Windows Service、Windows Task Scheduler、macOS LaunchDaemon/LaunchAgent 安装器；当前 Agent 已可独立运行，但尚未自动注册到系统启动项。
+- Windows Service、Windows Task Scheduler、macOS LaunchDaemon/LaunchAgent 自动注册；当前内置Agent随Client启动，但尚未注册为登录前系统服务。
 - 系统 Keychain/Credential Manager 存储 Token；目前配置文件仍包含 Client Token。
 - 持久化文件日志、日志轮转、磁盘空间预警和通知。
 - Server 保留规则和 trash 到期清理。
