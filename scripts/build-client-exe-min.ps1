@@ -1,7 +1,12 @@
-﻿$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
+
+Push-Location (Join-Path $root "frontend")
+npm.cmd ci
+npm.cmd run build
+Pop-Location
 
 $venv = Join-Path $root ".venv-client-build"
 $python311 = $null
@@ -34,8 +39,9 @@ Remove-Item -Force -ErrorAction SilentlyContinue dist\FileBackupClient.exe
   --noconsole `
   --onefile `
   --name FileBackupClient `
-  --hidden-import pystray._win32 `
-  --hidden-import PIL._tkinter_finder `
+  --icon "assets\app-icon.ico" `
+  --add-data "frontend\dist;frontend\dist" `
+  --collect-all webview `
   --collect-submodules tzdata `
   --exclude-module fastapi `
   --exclude-module uvicorn `
@@ -45,7 +51,26 @@ Remove-Item -Force -ErrorAction SilentlyContinue dist\FileBackupClient.exe
   --exclude-module server `
   run_client_gui.py
 
+& $python -m PyInstaller `
+  --clean `
+  --noconfirm `
+  --noconsole `
+  --onefile `
+  --name FileBackupClientAgent `
+  --icon "assets\app-icon.ico" `
+  --collect-submodules tzdata `
+  --exclude-module fastapi `
+  --exclude-module uvicorn `
+  --exclude-module sqlalchemy `
+  --exclude-module pydantic `
+  --exclude-module pytest `
+  --exclude-module server `
+  run_client_agent.py
+
 Remove-Item -Recurse -Force -ErrorAction SilentlyContinue build\FileBackupClient
+Remove-Item -Recurse -Force -ErrorAction SilentlyContinue build\FileBackupClientAgent
 Remove-Item -Force -ErrorAction SilentlyContinue FileBackupClient.spec
+Remove-Item -Force -ErrorAction SilentlyContinue FileBackupClientAgent.spec
 
 Write-Host "Built GUI executable: $root\dist\FileBackupClient.exe"
+Write-Host "Built background agent: $root\dist\FileBackupClientAgent.exe"

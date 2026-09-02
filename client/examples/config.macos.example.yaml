@@ -1,0 +1,59 @@
+client:
+  machine_id: "mac-client-01"
+  display_name: "家里 Mac"
+  timezone: "Asia/Shanghai"
+  data_dir: "/Users/Shared/FileBackupClient"
+  temp_dir: "/Users/Shared/FileBackupClient/tmp"
+  outbox_dir: "/Users/Shared/FileBackupClient/outbox"
+
+servers:
+  - id: "server-a"
+    name: "Server A"
+    base_url: "https://backup-a.example.com"
+    token: "REPLACE_WITH_SERVER_A_CLIENT_TOKEN"
+    timeout_seconds: 60
+    verify_tls: true
+    enabled: true
+  - id: "server-b"
+    name: "Server B"
+    base_url: "https://backup-b.example.com"
+    token: "REPLACE_WITH_SERVER_B_CLIENT_TOKEN"
+    timeout_seconds: 60
+    verify_tls: true
+    enabled: true
+
+backup:
+  archive_format: "tar.gz"
+  retry_count: 3
+  retry_interval_seconds: 5
+  copy_stability_check: true
+  stability_check_interval_seconds: 1
+  required_copies: 2
+  keep_local_until_all_uploaded: true
+
+restore:
+  create_rollback_snapshot: true
+  allowed_roots:
+    - "/Users/Shared/BackupData"
+  rollback_dir: "/Users/Shared/FileBackupClient/rollback"
+  require_same_machine_id: true
+
+transfer:
+  inbox_dir: "/Users/Shared/FileBackup Inbox"
+  temp_dir: "/Users/Shared/FileBackupClient/transfer-tmp"
+  allowed_send_roots:
+    - "/Users/Shared/BackupData"
+  require_confirmation: true
+  overwrite_existing: false
+
+tasks:
+  - name: "daily_logs"
+    enabled: true
+    schedule_enabled: true
+    schedule_time: "04:00"
+    roots:
+      - path: "/Users/Shared/BackupData/logs"
+        source_type: "folder"
+        recursive: true
+        include: ["*.log", "*.json", "*.xlsx"]
+        exclude: ["*.tmp", "~$*.xlsx", "__pycache__/*"]

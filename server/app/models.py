@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from sqlalchemy import Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -65,3 +65,34 @@ class AuditLog(Base):
     ip_address: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[str] = mapped_column(String(64), nullable=False)
     detail_json: Mapped[str | None] = mapped_column(Text)
+
+
+class PairingCode(Base):
+    __tablename__ = "pairing_codes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    code_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    created_at: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[str] = mapped_column(String(64), nullable=False)
+    used_at: Mapped[str | None] = mapped_column(String(64))
+    created_by: Mapped[str] = mapped_column(String(128), nullable=False)
+
+
+class Transfer(Base):
+    __tablename__ = "transfers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    transfer_id: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    sender_device_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    receiver_device_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    created_at: Mapped[str] = mapped_column(String(64), nullable=False)
+    updated_at: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[str] = mapped_column(String(64), nullable=False)
+    file_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    total_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    bundle_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    bundle_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    storage_path: Mapped[str] = mapped_column(Text, nullable=False)
+    manifest_path: Mapped[str] = mapped_column(Text, nullable=False)
+    error_message: Mapped[str | None] = mapped_column(Text)

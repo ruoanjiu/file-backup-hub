@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import re
@@ -76,10 +76,42 @@ def init_backup(db: Session, payload: BackupInitRequest, actor: Actor, settings:
 
     existing = db.scalar(select(Backup).where(Backup.backup_id == payload.backup_id))
     if existing is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="backup_id already exists",
+        if existing.status == "DELETED":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="backup_id was deleted and cannot be reused",
+            )
+        incoming_manifest = payload.manifest.model_dump(mode="json")
+        try:
+            stored_manifest = load_manifest_for_backup(existing)
+        except HTTPException:
+            stored_manifest = None
+        same_backup = (
+            existing.machine_id == payload.machine_id
+            and existing.task_name == payload.task_name
+            and existing.bundle_sha256 == payload.bundle_sha256
+            and existing.file_count == payload.file_count
+            and existing.total_size == payload.total_size
+            and stored_manifest == incoming_manifest
         )
+        if not same_backup:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="backup_id already exists with different metadata",
+            )
+        if existing.status == "COMPLETED":
+            return existing
+        if existing.status == "UPLOADING":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="backup_id is currently uploading",
+            )
+        existing.status = "PENDING"
+        existing.error_message = None
+        _audit(db, actor, "backup.retry.init", payload.backup_id)
+        db.commit()
+        db.refresh(existing)
+        return existing
 
     paths = get_storage_paths(
         settings.storage_root,
@@ -246,26 +278,54 @@ def load_manifest_for_backup(backup: Backup) -> dict:
         ) from exc
 
 
-def delete_backup(db: Session, backup: Backup, actor: Actor) -> None:
+def delete_backup(
+    db: Session,
+    backup: Backup,
+    actor: Actor,
+    settings: Settings,
+) -> None:
     if backup.status == "DELETED":
         return
 
-    trash_base: Path | None = None
-    moved_paths: list[str] = []
-    for raw_path in [backup.storage_path, backup.manifest_path]:
+    move_plan: list[tuple[Path, Path]] = []
+    path_kinds = [
+        (backup.storage_path, "storage"),
+        (backup.manifest_path, "manifests"),
+    ]
+    for raw_path, kind in path_kinds:
         if not raw_path:
             continue
         source_dir = Path(raw_path).parent
         if not source_dir.exists():
             continue
-        if trash_base is None:
-            trash_base = source_dir.parents[2] / "trash" if len(source_dir.parents) >= 3 else source_dir.parent / "trash"
-        target_dir = trash_base / backup.machine_id / backup.task_name / backup.backup_id / source_dir.parent.name
-        target_dir.parent.mkdir(parents=True, exist_ok=True)
+        target_dir = (
+            settings.trash_root
+            / kind
+            / backup.machine_id
+            / backup.task_name
+            / backup.backup_id
+        )
         if target_dir.exists():
-            shutil.rmtree(target_dir)
-        shutil.move(str(source_dir), str(target_dir))
-        moved_paths.append(str(target_dir))
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Trash target already exists: {target_dir}",
+            )
+        move_plan.append((source_dir, target_dir))
+
+    moved_paths: list[str] = []
+    completed_moves: list[tuple[Path, Path]] = []
+    try:
+        for source_dir, target_dir in move_plan:
+            target_dir.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(source_dir), str(target_dir))
+            completed_moves.append((source_dir, target_dir))
+            moved_paths.append(str(target_dir))
+    except Exception:
+        for source_dir, target_dir in reversed(completed_moves):
+            if target_dir.exists() and not source_dir.exists():
+                source_dir.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(target_dir), str(source_dir))
+        raise
 
     backup.status = "DELETED"
     backup.error_message = None

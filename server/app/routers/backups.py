@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from pathlib import Path
 
@@ -149,7 +149,18 @@ def delete_backup_route(
     backup_id: str,
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_current_actor),
+    settings: Settings = Depends(get_settings),
 ) -> dict[str, str]:
+    if not settings.allow_backup_delete:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Backup deletion is disabled on this Server",
+        )
+    if not actor.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the Server administrator can delete backup copies",
+        )
     backup = get_backup_for_actor(db, backup_id, actor)
-    delete_backup(db, backup, actor)
+    delete_backup(db, backup, actor, settings)
     return {"backup_id": backup_id, "status": "DELETED"}

@@ -1,5 +1,5 @@
-from client.app.gui import main
+from client.app.webview_app import run_client_webview
 
 
 if __name__ == "__main__":
-    main()
+    run_client_webview()

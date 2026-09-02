@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import queue
@@ -20,11 +20,16 @@ except ImportError:  # pragma: no cover - optional runtime GUI feature
     ImageDraw = None
 
 from client.app.backup import run_backup_for_task
-from client.app.config import AppConfig, default_config_path, load_config
+from client.app.config import (
+    AppConfig,
+    default_client_data_dir,
+    default_config_path,
+    load_config,
+)
 from client.app.local_db import LocalDb
 from client.app.restore import rollback_restore, run_restore, run_verify
 from client.app.scheduler import BackupTaskScheduler
-from client.app.uploader import BackupServerClient
+from client.app.uploader import BackupServerClient, list_backups_across_servers
 
 
 DEFAULT_EXCLUDES = ["*.tmp", "~$*.xlsx", "__pycache__/*"]
@@ -71,13 +76,14 @@ class BackupGui:
         self.server_url_var = tk.StringVar(value="http://127.0.0.1:8000")
         self.token_var = tk.StringVar(value="REPLACE_WITH_CLIENT_TOKEN")
         self.machine_id_var = tk.StringVar(value="pc1")
-        self.data_dir_var = tk.StringVar(value="C:/ProgramData/FileBackupClient")
+        self.data_dir_var = tk.StringVar(value=str(default_client_data_dir()))
         self.connection_status_var = tk.StringVar(value="未连接")
         self.task_name_var = tk.StringVar()
         self.task_type_var = tk.StringVar(value="once")
         self.schedule_time_var = tk.StringVar(value="04:00")
         self.backup_id_var = tk.StringVar()
         self.restore_id_var = tk.StringVar()
+        self.restore_server_var = tk.StringVar(value="auto")
 
         self._apply_style()
         self._build_ui()
@@ -314,7 +320,8 @@ class BackupGui:
         buttons.grid(row=2, column=4, columnspan=2, sticky="e", pady=3)
         ttk.Button(buttons, text="加载配置", command=self._load_config_clicked).pack(side=LEFT, padx=(0, 6))
         ttk.Button(buttons, text="保存配置", command=self._save_config_clicked).pack(side=LEFT, padx=(0, 6))
-        ttk.Button(buttons, text="测试连接", command=self._test_server_clicked, style="Primary.TButton").pack(side=LEFT)
+        ttk.Button(buttons, text="管理 Servers", command=self._manage_servers_clicked).pack(side=LEFT, padx=(0, 6))
+        ttk.Button(buttons, text="测试全部", command=self._test_server_clicked, style="Primary.TButton").pack(side=LEFT)
 
     def _build_task_panel(self, parent: tk.Frame) -> None:
         card, frame = self._card(parent, "备份任务")
@@ -416,12 +423,6 @@ class BackupGui:
             command=self._list_backups_clicked,
             style="Primary.TButton",
         ).pack(side=LEFT, padx=(0, 6))
-        ttk.Button(
-            buttons,
-            text="删除选中备份",
-            command=self._delete_remote_backup_clicked,
-            style="Danger.TButton",
-        ).pack(side=LEFT)
 
         self.backup_list = self._make_listbox(frame, height=12)
         self.backup_list.grid(row=1, column=0, sticky="nsew", pady=(0, 12))
@@ -438,8 +439,17 @@ class BackupGui:
         restore.columnconfigure(1, weight=1)
         self._row(restore, "Backup ID", self.backup_id_var, 0, width=48)
         self._row(restore, "Restore ID", self.restore_id_var, 1, width=48)
+        ttk.Label(restore, text="恢复来源").grid(row=2, column=0, sticky="w", padx=6, pady=4)
+        self.restore_server_combo = ttk.Combobox(
+            restore,
+            textvariable=self.restore_server_var,
+            values=["auto"],
+            state="readonly",
+            width=32,
+        )
+        self.restore_server_combo.grid(row=2, column=1, sticky="ew", padx=6, pady=4)
         restore_buttons = ttk.Frame(restore, style="Card.TFrame")
-        restore_buttons.grid(row=2, column=0, columnspan=3, sticky="w", padx=6, pady=6)
+        restore_buttons.grid(row=3, column=0, columnspan=3, sticky="w", padx=6, pady=6)
         ttk.Button(restore_buttons, text="校验备份", command=self._verify_clicked).pack(side=LEFT, padx=(0, 6))
         ttk.Button(restore_buttons, text="恢复备份", command=self._restore_clicked, style="Primary.TButton").pack(
             side=LEFT,
@@ -552,6 +562,10 @@ class BackupGui:
             self.token_var.set(self.config.server.token)
             self.machine_id_var.set(self.config.client.machine_id)
             self.data_dir_var.set(str(self.config.client.data_dir))
+            self.restore_server_combo.configure(
+                values=["auto", *[server.id for server in self.config.enabled_servers()]]
+            )
+            self.restore_server_var.set("auto")
             self._fill_task_list()
             self.connection_status_var.set("配置已加载")
             self._log(f"已加载配置: {self.config_path_var.get()}")
@@ -647,6 +661,7 @@ class BackupGui:
     def _config_to_dict(self) -> dict:
         data_dir = self.data_dir_var.get().strip()
         tasks = []
+        servers = []
         if self.config is not None:
             for task in self.config.tasks:
                 tasks.append(
@@ -667,30 +682,84 @@ class BackupGui:
                         ],
                     }
                 )
+            for index, server in enumerate(self.config.servers):
+                servers.append(
+                    {
+                        "id": server.id,
+                        "name": server.name,
+                        "base_url": (
+                            self.server_url_var.get().strip()
+                            if index == 0
+                            else server.base_url
+                        ),
+                        "token": self.token_var.get().strip() if index == 0 else server.token,
+                        "timeout_seconds": server.timeout_seconds,
+                        "verify_tls": (
+                            not self.server_url_var.get().lower().startswith("http://")
+                            if index == 0
+                            else server.verify_tls
+                        ),
+                        "enabled": server.enabled,
+                    }
+                )
+        if not servers:
+            servers.append(
+                {
+                    "id": "server-1",
+                    "name": "Server 1",
+                    "base_url": self.server_url_var.get().strip(),
+                    "token": self.token_var.get().strip(),
+                    "timeout_seconds": 60,
+                    "verify_tls": not self.server_url_var.get().lower().startswith("http://"),
+                    "enabled": True,
+                }
+            )
         return {
             "client": {
                 "machine_id": self.machine_id_var.get().strip(),
+                "display_name": (
+                    self.config.client.display_name
+                    if self.config is not None
+                    else self.machine_id_var.get().strip()
+                ),
                 "timezone": "Asia/Shanghai",
                 "data_dir": data_dir,
                 "temp_dir": str(Path(data_dir) / "tmp"),
+                "outbox_dir": str(Path(data_dir) / "outbox"),
             },
-            "server": {
-                "base_url": self.server_url_var.get().strip(),
-                "token": self.token_var.get().strip(),
-                "timeout_seconds": 60,
-                "verify_tls": not self.server_url_var.get().lower().startswith("http://"),
-            },
+            "servers": servers,
             "backup": {
                 "schedule_enabled": False,
                 "archive_format": "tar.gz",
                 "copy_stability_check": True,
                 "stability_check_interval_seconds": 1,
+                "required_copies": len([server for server in servers if server["enabled"]]),
+                "keep_local_until_all_uploaded": True,
             },
             "restore": {
                 "create_rollback_snapshot": True,
                 "allowed_roots": [source for source in self._all_source_roots(tasks)] or [data_dir],
                 "rollback_dir": str(Path(data_dir) / "rollback"),
                 "require_same_machine_id": True,
+            },
+            "transfer": {
+                "inbox_dir": str(
+                    self.config.transfer.inbox_dir
+                    if self.config is not None
+                    else Path.home() / "Downloads" / "FileBackup Inbox"
+                ),
+                "temp_dir": str(
+                    self.config.transfer.temp_dir
+                    if self.config is not None
+                    else Path(data_dir) / "transfer-tmp"
+                ),
+                "allowed_send_roots": (
+                    [str(path) for path in self.config.transfer.allowed_send_roots]
+                    if self.config is not None
+                    else []
+                ),
+                "require_confirmation": True,
+                "overwrite_existing": False,
             },
             "tasks": tasks,
         }
@@ -735,13 +804,164 @@ class BackupGui:
             self.config = load_config(Path(self.config_path_var.get()))
         return self.config
 
+    def _manage_servers_clicked(self) -> None:
+        data = self._config_to_dict()
+        servers = data["servers"]
+        window = tk.Toplevel(self.root)
+        window.title("管理备份 Servers")
+        window.geometry("820x430")
+        frame = ttk.Frame(window, padding=14)
+        frame.pack(fill="both", expand=True)
+        server_list = tk.Listbox(frame, width=28, activestyle="none")
+        server_list.grid(row=0, column=0, rowspan=8, sticky="nsew", padx=(0, 12))
+        frame.rowconfigure(0, weight=1)
+        frame.columnconfigure(1, weight=1)
+
+        server_id_var = tk.StringVar()
+        name_var = tk.StringVar()
+        url_var = tk.StringVar()
+        token_var = tk.StringVar()
+        enabled_var = tk.BooleanVar(value=True)
+        fields = [
+            ("Server ID", server_id_var, False),
+            ("名称", name_var, False),
+            ("URL", url_var, False),
+            ("Token", token_var, True),
+        ]
+        for row, (label, variable, secret) in enumerate(fields):
+            ttk.Label(frame, text=label).grid(row=row, column=1, sticky="w", pady=6)
+            ttk.Entry(frame, textvariable=variable, show="*" if secret else "").grid(
+                row=row,
+                column=2,
+                sticky="ew",
+                pady=6,
+            )
+        ttk.Checkbutton(frame, text="启用", variable=enabled_var).grid(
+            row=4,
+            column=1,
+            columnspan=2,
+            sticky="w",
+            pady=6,
+        )
+
+        def refresh(selected: int = 0) -> None:
+            server_list.delete(0, END)
+            for server in servers:
+                marker = "启用" if server.get("enabled", True) else "停用"
+                server_list.insert(END, f"{server['id']} | {marker}")
+            if servers:
+                selected = min(max(selected, 0), len(servers) - 1)
+                server_list.selection_set(selected)
+                load_selected()
+
+        def load_selected(_: object | None = None) -> None:
+            selection = server_list.curselection()
+            if not selection:
+                return
+            server = servers[selection[0]]
+            server_id_var.set(server["id"])
+            name_var.set(server.get("name") or server["id"])
+            url_var.set(server["base_url"])
+            token_var.set(server["token"])
+            enabled_var.set(bool(server.get("enabled", True)))
+
+        def current_server() -> dict:
+            server_id = server_id_var.get().strip()
+            url = url_var.get().strip()
+            token = token_var.get().strip()
+            if not server_id or not url or not token:
+                raise ValueError("Server ID、URL 和 Token 不能为空")
+            return {
+                "id": server_id,
+                "name": name_var.get().strip() or server_id,
+                "base_url": url.rstrip("/"),
+                "token": token,
+                "timeout_seconds": 60,
+                "verify_tls": not url.lower().startswith("http://"),
+                "enabled": enabled_var.get(),
+            }
+
+        def save_selected() -> None:
+            selection = server_list.curselection()
+            item = current_server()
+            if selection:
+                index = selection[0]
+                if any(
+                    server["id"] == item["id"]
+                    for other_index, server in enumerate(servers)
+                    if other_index != index
+                ):
+                    raise ValueError(f"Server ID 重复: {item['id']}")
+                servers[index] = item
+                refresh(index)
+            else:
+                if any(server["id"] == item["id"] for server in servers):
+                    raise ValueError(f"Server ID 重复: {item['id']}")
+                servers.append(item)
+                refresh(len(servers) - 1)
+
+        def new_server() -> None:
+            server_list.selection_clear(0, END)
+            server_id_var.set(f"server-{len(servers) + 1}")
+            name_var.set(f"Server {len(servers) + 1}")
+            url_var.set("http://")
+            token_var.set("")
+            enabled_var.set(True)
+
+        def remove_selected() -> None:
+            selection = server_list.curselection()
+            if not selection:
+                return
+            if len(servers) <= 1:
+                raise ValueError("至少保留一台 Server")
+            servers.pop(selection[0])
+            refresh(0)
+
+        def apply_all() -> None:
+            save_selected()
+            enabled_count = sum(bool(server.get("enabled", True)) for server in servers)
+            if enabled_count < 1:
+                raise ValueError("至少启用一台 Server")
+            data["backup"]["required_copies"] = enabled_count
+            path = Path(self.config_path_var.get())
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                yaml.safe_dump(data, allow_unicode=True, sort_keys=False),
+                encoding="utf-8",
+            )
+            window.destroy()
+            self._load_config_clicked()
+
+        server_list.bind("<<ListboxSelect>>", load_selected)
+        buttons = ttk.Frame(frame)
+        buttons.grid(row=6, column=1, columnspan=2, sticky="w", pady=(16, 0))
+        ttk.Button(buttons, text="新建", command=lambda: self._safe_gui_action(new_server)).pack(side=LEFT, padx=(0, 6))
+        ttk.Button(buttons, text="保存当前", command=lambda: self._safe_gui_action(save_selected)).pack(side=LEFT, padx=(0, 6))
+        ttk.Button(buttons, text="移除", command=lambda: self._safe_gui_action(remove_selected)).pack(side=LEFT, padx=(0, 6))
+        ttk.Button(buttons, text="应用并关闭", command=lambda: self._safe_gui_action(apply_all)).pack(side=LEFT)
+        refresh(0)
+
+    def _safe_gui_action(self, action) -> None:
+        try:
+            action()
+        except Exception as exc:
+            messagebox.showerror("操作失败", str(exc))
+
     def _test_server_clicked(self) -> None:
         self.connection_status_var.set("连接检测中")
 
         def task() -> dict[str, Any]:
-            result = BackupServerClient(self._require_config().server).health()
-            self.root.after(0, lambda: self.connection_status_var.set("已连接"))
-            return result
+            config = self._require_config()
+            results: dict[str, Any] = {}
+            for server in config.enabled_servers():
+                health = BackupServerClient(server).health()
+                if health.get("server_id") and health["server_id"] != server.id:
+                    raise ValueError(
+                        f"{server.id} 实际连接到不同 Server: {health['server_id']}"
+                    )
+                results[server.id] = health
+            self.root.after(0, lambda: self.connection_status_var.set("全部已连接"))
+            return results
 
         self._run_worker("测试连接", task)
 
@@ -778,7 +998,9 @@ class BackupGui:
     def _list_backups_clicked(self) -> None:
         def task() -> dict:
             config = self._require_config()
-            response = BackupServerClient(config.server).list_backups(
+            response = list_backups_across_servers(
+                config,
+                server_id="all",
                 machine_id=config.client.machine_id,
                 task_name=None,
                 limit=200,
@@ -794,7 +1016,7 @@ class BackupGui:
         for item in self.backup_items:
             self.backup_list.insert(
                 END,
-                f"{item['backup_id']} | {item['task_name']} | {item['status']} | {item['created_at']}",
+                f"{item['backup_id']} | {item['task_name']} | {item['copy_status']} | {item['created_at']}",
             )
 
     def _backup_selected_from_list(self, _: object) -> None:
@@ -803,22 +1025,14 @@ class BackupGui:
             return
         self.backup_id_var.set(self.backup_items[selection[0]]["backup_id"])
 
-    def _delete_remote_backup_clicked(self) -> None:
-        backup_id = self.backup_id_var.get().strip()
-        if not backup_id:
-            messagebox.showwarning("缺少 Backup ID", "请先选择或输入 Backup ID")
-            return
-        if not messagebox.askyesno("确认删除备份", f"删除远端备份 {backup_id}？"):
-            return
-        self._run_worker(
-            "删除远端备份",
-            lambda: BackupServerClient(self._require_config().server).delete_backup(backup_id),
-        )
-
     def _verify_clicked(self) -> None:
         self._run_worker(
             "校验备份",
-            lambda: run_verify(self._require_config(), self.backup_id_var.get().strip()).__dict__,
+            lambda: run_verify(
+                self._require_config(),
+                self.backup_id_var.get().strip(),
+                server_id=self.restore_server_var.get(),
+            ).__dict__,
         )
 
     def _restore_clicked(self) -> None:
@@ -826,7 +1040,11 @@ class BackupGui:
             return
 
         def task() -> dict:
-            result = run_restore(self._require_config(), self.backup_id_var.get().strip())
+            result = run_restore(
+                self._require_config(),
+                self.backup_id_var.get().strip(),
+                server_id=self.restore_server_var.get(),
+            )
             self.root.after(0, lambda: self.restore_id_var.set(result.restore_id))
             return result.__dict__
 

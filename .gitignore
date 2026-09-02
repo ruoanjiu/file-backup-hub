@@ -10,6 +10,9 @@ __pycache__/
 .venv/
 venv/
 .venv-client-build/
+.venv-client-build-macos/
+.venv-server-build/
+.venv-server-build-macos/
 
 # Local runtime data
 data/
@@ -31,6 +34,7 @@ config.yaml
 # Build artifacts
 build/
 dist/
+node_modules/
 *.spec
 *.exe
 *.zip

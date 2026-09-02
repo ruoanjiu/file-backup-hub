@@ -1,6 +1,5 @@
 httpx
 pyyaml
 apscheduler
-pystray
-pillow
+pywebview
 tzdata

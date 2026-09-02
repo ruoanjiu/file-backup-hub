@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
@@ -76,6 +76,7 @@ class BackupListResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     app: str
+    server_id: str
 
 
 JsonObject = dict[str, Any]

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import fnmatch
 import json
@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from client.app.config import AppConfig
+from client.app.config import AppConfig, ServerSection
 from client.app.local_db import LocalDb
 from client.app.manifest import now_for_config
 from client.app.uploader import BackupServerClient
@@ -32,6 +32,7 @@ class VerifyResult:
     backup_id: str
     file_count: int
     bundle_sha256: str
+    server_id: str = "server-1"
     status: str = "SUCCESS"
 
 
@@ -42,6 +43,7 @@ class RestoreResult:
     status: str
     restored_count: int
     rollback_dir: Path
+    server_id: str | None = None
     error_message: str | None = None
 
 
@@ -57,6 +59,14 @@ class RollbackResult:
 class RollbackSnapshot:
     rollback_dir: Path
     plans: list[RestoreFilePlan] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class BackupSource:
+    server: ServerSection
+    client: BackupServerClient
+    metadata: dict[str, Any]
+    manifest: dict[str, Any]
 
 
 def _canonical_json(data: dict[str, Any]) -> str:
@@ -91,12 +101,20 @@ def safe_extract_bundle(bundle_path: Path, extract_dir: Path) -> None:
     with tarfile.open(bundle_path, "r:gz") as tar:
         members = tar.getmembers()
         for member in members:
-            _safe_member_path(extract_dir, member.name)
+            target = _safe_member_path(extract_dir, member.name)
             if member.issym() or member.islnk():
                 raise ValueError(f"Archive links are not allowed: {member.name}")
             if not member.isfile() and not member.isdir():
                 raise ValueError(f"Archive member type is not allowed: {member.name}")
-        tar.extractall(extract_dir, members=members)
+            if member.isdir():
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            source = tar.extractfile(member)
+            if source is None:
+                raise ValueError(f"Unable to read archive member: {member.name}")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with source, target.open("wb") as destination:
+                shutil.copyfileobj(source, destination)
 
 
 def verify_extracted_backup(extract_dir: Path, server_manifest: dict[str, Any]) -> int:
@@ -128,6 +146,7 @@ def verify_backup_bundle(
     server_manifest: dict[str, Any],
     expected_bundle_sha256: str | None,
     extract_dir: Path,
+    server_id: str = "server-1",
 ) -> VerifyResult:
     actual_bundle_sha256 = calculate_sha256(bundle_path)
     if expected_bundle_sha256 and actual_bundle_sha256 != expected_bundle_sha256:
@@ -138,7 +157,69 @@ def verify_backup_bundle(
         backup_id=server_manifest["backup_id"],
         file_count=verified_count,
         bundle_sha256=actual_bundle_sha256,
+        server_id=server_id,
     )
+
+
+def _load_backup_sources(
+    config: AppConfig,
+    backup_id: str,
+    *,
+    server_id: str | None,
+    server_client: BackupServerClient | None,
+    server_clients: dict[str, BackupServerClient] | None = None,
+) -> list[BackupSource]:
+    if server_client is not None:
+        servers_and_clients = [(config.server, server_client)]
+    else:
+        servers = (
+            [config.get_server(server_id)]
+            if server_id and server_id != "auto"
+            else config.enabled_servers()
+        )
+        servers_and_clients = [
+            (
+                server,
+                (server_clients or {}).get(server.id) or BackupServerClient(server),
+            )
+            for server in servers
+        ]
+
+    sources: list[BackupSource] = []
+    errors: list[str] = []
+    for server, client in servers_and_clients:
+        try:
+            metadata = client.get_backup_metadata(backup_id)
+            manifest = client.download_manifest(backup_id)
+            sources.append(
+                BackupSource(
+                    server=server,
+                    client=client,
+                    metadata=metadata,
+                    manifest=manifest,
+                )
+            )
+        except Exception as exc:
+            errors.append(f"{server.id}: {exc}")
+
+    if not sources:
+        raise RuntimeError(
+            f"Backup {backup_id} is unavailable on the selected Server(s): "
+            + "; ".join(errors)
+        )
+
+    if not server_id or server_id == "auto":
+        hashes = {
+            source.metadata.get("bundle_sha256")
+            for source in sources
+            if source.metadata.get("bundle_sha256")
+        }
+        manifests = {_canonical_json(source.manifest) for source in sources}
+        if len(hashes) > 1 or len(manifests) > 1:
+            raise ValueError(
+                f"Backup {backup_id} has conflicting copies across Servers; choose and verify one Server explicitly"
+            )
+    return sources
 
 
 def _matches_includes(file_entry: dict[str, Any], includes: list[str] | None) -> bool:
@@ -304,22 +385,37 @@ def run_verify(
     config: AppConfig,
     backup_id: str,
     server_client: BackupServerClient | None = None,
+    server_id: str | None = None,
+    server_clients: dict[str, BackupServerClient] | None = None,
 ) -> VerifyResult:
-    client = server_client or BackupServerClient(config.server)
-    metadata = client.get_backup_metadata(backup_id)
-    server_manifest = client.download_manifest(backup_id)
-    workdir = _reset_workdir(config.client.temp_dir, f"verify_{backup_id}_{uuid.uuid4().hex[:8]}")
-    try:
-        bundle_path = client.download_bundle(backup_id, workdir / "bundle.tar.gz")
-        return verify_backup_bundle(
-            bundle_path,
-            server_manifest,
-            metadata.get("bundle_sha256"),
-            workdir / "extracted",
+    sources = _load_backup_sources(
+        config,
+        backup_id,
+        server_id=server_id,
+        server_client=server_client,
+        server_clients=server_clients,
+    )
+    errors: list[str] = []
+    for source in sources:
+        workdir = _reset_workdir(
+            config.client.temp_dir,
+            f"verify_{backup_id}_{source.server.id}_{uuid.uuid4().hex[:8]}",
         )
-    finally:
-        if workdir.exists():
-            shutil.rmtree(workdir)
+        try:
+            bundle_path = source.client.download_bundle(backup_id, workdir / "bundle.tar.gz")
+            return verify_backup_bundle(
+                bundle_path,
+                source.manifest,
+                source.metadata.get("bundle_sha256"),
+                workdir / "extracted",
+                source.server.id,
+            )
+        except Exception as exc:
+            errors.append(f"{source.server.id}: {exc}")
+        finally:
+            if workdir.exists():
+                shutil.rmtree(workdir)
+    raise RuntimeError("All selected backup copies failed verification: " + "; ".join(errors))
 
 
 def run_restore(
@@ -330,24 +426,55 @@ def run_restore(
     path_maps: list[str] | None = None,
     includes: list[str] | None = None,
     allow_cross_machine: bool = False,
+    server_id: str | None = None,
+    server_clients: dict[str, BackupServerClient] | None = None,
 ) -> RestoreResult:
-    client = server_client or BackupServerClient(config.server)
     db = local_db or LocalDb(config.client.data_dir / "client.sqlite")
     restore_id = _new_restore_id(config)
     workdir = _reset_workdir(config.client.temp_dir, f"{restore_id}_work")
     rollback_dir = config.restore.rollback_dir / restore_id
+    selected_server_id: str | None = None
     try:
-        metadata = client.get_backup_metadata(backup_id)
-        server_manifest = client.download_manifest(backup_id)
+        sources = _load_backup_sources(
+            config,
+            backup_id,
+            server_id=server_id,
+            server_client=server_client,
+            server_clients=server_clients,
+        )
+        server_manifest: dict[str, Any] | None = None
+        extract_dir: Path | None = None
+        download_errors: list[str] = []
+        for source in sources:
+            try:
+                if workdir.exists():
+                    shutil.rmtree(workdir)
+                workdir.mkdir(parents=True, exist_ok=True)
+                bundle_path = source.client.download_bundle(backup_id, workdir / "bundle.tar.gz")
+                candidate_extract_dir = workdir / "extracted"
+                verify_backup_bundle(
+                    bundle_path,
+                    source.manifest,
+                    source.metadata.get("bundle_sha256"),
+                    candidate_extract_dir,
+                    source.server.id,
+                )
+                selected_server_id = source.server.id
+                server_manifest = source.manifest
+                extract_dir = candidate_extract_dir
+                break
+            except Exception as exc:
+                download_errors.append(f"{source.server.id}: {exc}")
+        if server_manifest is None or extract_dir is None:
+            raise RuntimeError(
+                "All selected backup copies failed verification: " + "; ".join(download_errors)
+            )
         if (
             config.restore.require_same_machine_id
             and not allow_cross_machine
             and server_manifest.get("machine_id") != config.client.machine_id
         ):
             raise ValueError("Backup machine_id does not match this client")
-        bundle_path = client.download_bundle(backup_id, workdir / "bundle.tar.gz")
-        extract_dir = workdir / "extracted"
-        verify_backup_bundle(bundle_path, server_manifest, metadata.get("bundle_sha256"), extract_dir)
         plans = build_restore_plan(
             server_manifest,
             extract_dir,
@@ -363,6 +490,7 @@ def run_restore(
             str(server_manifest["task_name"]),
             now_for_config(config).isoformat(),
             str(snapshot.rollback_dir),
+            selected_server_id,
         )
         restored_count = 0
         for plan in snapshot.plans:
@@ -385,6 +513,7 @@ def run_restore(
             status="SUCCESS",
             restored_count=restored_count,
             rollback_dir=snapshot.rollback_dir,
+            server_id=selected_server_id,
         )
     except Exception as exc:
         if db.get_restore_job(restore_id) is None:
@@ -395,6 +524,7 @@ def run_restore(
                 "unknown",
                 now_for_config(config).isoformat(),
                 str(rollback_dir),
+                selected_server_id or server_id,
             )
         db.finish_restore_job(restore_id, "FAILED", now_for_config(config).isoformat(), str(exc))
         return RestoreResult(
@@ -403,6 +533,7 @@ def run_restore(
             status="FAILED",
             restored_count=0,
             rollback_dir=rollback_dir,
+            server_id=selected_server_id or server_id,
             error_message=str(exc),
         )
     finally:

@@ -1,6 +1,7 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -11,9 +12,11 @@ import yaml
 @dataclass(frozen=True)
 class ClientSection:
     machine_id: str
+    display_name: str
     timezone: str
     data_dir: Path
     temp_dir: Path
+    outbox_dir: Path
 
 
 @dataclass(frozen=True)
@@ -22,6 +25,9 @@ class ServerSection:
     token: str
     timeout_seconds: float = 60
     verify_tls: bool = True
+    id: str = "server-1"
+    name: str = "Server 1"
+    enabled: bool = True
 
 
 @dataclass(frozen=True)
@@ -35,6 +41,8 @@ class BackupSection:
     copy_stability_check: bool = True
     stability_check_interval_seconds: float = 1
     retention_hint_days: int = 90
+    required_copies: int = 1
+    keep_local_until_all_uploaded: bool = True
 
 
 @dataclass(frozen=True)
@@ -43,6 +51,15 @@ class RestoreSection:
     allowed_roots: list[Path] = field(default_factory=list)
     rollback_dir: Path = Path("rollback")
     require_same_machine_id: bool = True
+
+
+@dataclass(frozen=True)
+class TransferSection:
+    inbox_dir: Path
+    temp_dir: Path
+    allowed_send_roots: list[Path] = field(default_factory=list)
+    require_confirmation: bool = True
+    overwrite_existing: bool = False
 
 
 @dataclass(frozen=True)
@@ -74,10 +91,28 @@ class TaskConfig:
 @dataclass(frozen=True)
 class AppConfig:
     client: ClientSection
-    server: ServerSection
+    servers: list[ServerSection]
     backup: BackupSection
     restore: RestoreSection
+    transfer: TransferSection
     tasks: list[TaskConfig]
+
+    @property
+    def server(self) -> ServerSection:
+        """Backward-compatible access to the first enabled Server."""
+        for server in self.servers:
+            if server.enabled:
+                return server
+        raise ValueError("No enabled Server is configured")
+
+    def enabled_servers(self) -> list[ServerSection]:
+        return [server for server in self.servers if server.enabled]
+
+    def get_server(self, server_id: str) -> ServerSection:
+        for server in self.servers:
+            if server.id == server_id and server.enabled:
+                return server
+        raise ValueError(f"Enabled Server not found: {server_id}")
 
     def enabled_tasks(self) -> list[TaskConfig]:
         return [task for task in self.tasks if task.enabled]
@@ -100,7 +135,17 @@ def default_config_path() -> Path:
     if os.name == "nt":
         program_data = Path(os.getenv("PROGRAMDATA", "C:/ProgramData"))
         return program_data / "FileBackupClient" / "config.yaml"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "FileBackupClient" / "config.yaml"
     return Path("/etc/file-backup-client/config.yaml")
+
+
+def default_client_data_dir() -> Path:
+    if os.name == "nt":
+        return Path(os.getenv("PROGRAMDATA", "C:/ProgramData")) / "FileBackupClient"
+    if sys.platform == "darwin":
+        return Path("/Users/Shared/FileBackupClient")
+    return Path.home() / ".local" / "share" / "file-backup-client"
 
 
 def _as_mapping(data: Any, name: str) -> dict[str, Any]:
@@ -176,15 +221,54 @@ def _load_task(raw: Any, index: int) -> TaskConfig:
     )
 
 
+def _load_server(raw: Any, index: int) -> ServerSection:
+    server = _as_mapping(raw, f"servers[{index}]")
+    base_url = server.get("base_url")
+    token = server.get("token")
+    enabled = bool(server.get("enabled", True))
+    if not isinstance(base_url, str) or not base_url.strip():
+        raise ValueError(f"servers[{index}].base_url must be a non-empty string")
+    if not isinstance(token, str) or (enabled and not token.strip()):
+        raise ValueError(f"servers[{index}].token must be a non-empty string")
+    server_id = server.get("id") or f"server-{index + 1}"
+    if not isinstance(server_id, str) or not server_id.strip():
+        raise ValueError(f"servers[{index}].id must be a non-empty string")
+    return ServerSection(
+        base_url=base_url.rstrip("/"),
+        token=token,
+        timeout_seconds=float(server.get("timeout_seconds", 60)),
+        verify_tls=bool(server.get("verify_tls", True)),
+        id=server_id.strip(),
+        name=str(server.get("name") or server_id).strip(),
+        enabled=enabled,
+    )
+
+
+def _assert_writable_paths_outside_sources(
+    tasks: list[TaskConfig],
+    writable_paths: list[Path],
+) -> None:
+    """The backup agent must never place its own writable data under a source root."""
+    for task in tasks:
+        for root in task.roots:
+            source = root.path.expanduser().resolve(strict=False)
+            for writable in writable_paths:
+                target = writable.expanduser().resolve(strict=False)
+                if target == source or target.is_relative_to(source):
+                    raise ValueError(
+                        f"Client writable path must be outside backup source {source}: {target}"
+                    )
+
+
 def load_config(path: Path) -> AppConfig:
     with path.open("r", encoding="utf-8") as file_obj:
         data = yaml.safe_load(file_obj) or {}
 
     root = _as_mapping(data, "config")
     client_raw = _as_mapping(root.get("client"), "client")
-    server_raw = _as_mapping(root.get("server"), "server")
     backup_raw = _as_mapping(root.get("backup") or {}, "backup")
     restore_raw = _as_mapping(root.get("restore") or {}, "restore")
+    transfer_raw = _as_mapping(root.get("transfer") or {}, "transfer")
 
     data_dir = _path(client_raw.get("data_dir"), "client.data_dir", require_absolute=True)
     temp_dir_raw = client_raw.get("temp_dir")
@@ -193,17 +277,28 @@ def load_config(path: Path) -> AppConfig:
         if temp_dir_raw
         else data_dir / "tmp"
     )
+    outbox_dir_raw = client_raw.get("outbox_dir")
+    outbox_dir = (
+        _path(outbox_dir_raw, "client.outbox_dir", require_absolute=True)
+        if outbox_dir_raw
+        else data_dir / "outbox"
+    )
 
     machine_id = client_raw.get("machine_id")
     if not isinstance(machine_id, str) or not machine_id.strip():
         raise ValueError("client.machine_id must be a non-empty string")
 
-    base_url = server_raw.get("base_url")
-    token = server_raw.get("token")
-    if not isinstance(base_url, str) or not base_url.strip():
-        raise ValueError("server.base_url must be a non-empty string")
-    if not isinstance(token, str) or not token.strip():
-        raise ValueError("server.token must be a non-empty string")
+    if root.get("servers") is not None:
+        servers = [
+            _load_server(server_raw, index)
+            for index, server_raw in enumerate(_as_list(root.get("servers"), "servers"))
+        ]
+    else:
+        # Keep old single-Server config files working during migration.
+        servers = [_load_server(_as_mapping(root.get("server"), "server"), 0)]
+    server_ids = [server.id for server in servers]
+    if len(server_ids) != len(set(server_ids)):
+        raise ValueError("Server IDs must be unique")
 
     rollback_dir_raw = restore_raw.get("rollback_dir")
     restore = RestoreSection(
@@ -220,19 +315,67 @@ def load_config(path: Path) -> AppConfig:
         require_same_machine_id=bool(restore_raw.get("require_same_machine_id", True)),
     )
 
+    inbox_dir_raw = transfer_raw.get("inbox_dir")
+    transfer_temp_raw = transfer_raw.get("temp_dir")
+    transfer = TransferSection(
+        inbox_dir=(
+            _path(inbox_dir_raw, "transfer.inbox_dir", require_absolute=True)
+            if inbox_dir_raw
+            else Path.home() / "Downloads" / "FileBackup Inbox"
+        ),
+        temp_dir=(
+            _path(transfer_temp_raw, "transfer.temp_dir", require_absolute=True)
+            if transfer_temp_raw
+            else data_dir / "transfer-tmp"
+        ),
+        allowed_send_roots=[
+            _path(item, "transfer.allowed_send_roots[]", require_absolute=True)
+            for item in _string_list(
+                transfer_raw.get("allowed_send_roots"),
+                "transfer.allowed_send_roots",
+                [],
+            )
+        ],
+        require_confirmation=bool(transfer_raw.get("require_confirmation", True)),
+        overwrite_existing=bool(transfer_raw.get("overwrite_existing", False)),
+    )
+
+    tasks = [
+        _load_task(task_raw, index)
+        for index, task_raw in enumerate(_as_list(root.get("tasks"), "tasks"))
+    ]
+    _assert_writable_paths_outside_sources(
+        tasks,
+        [
+            data_dir,
+            temp_dir,
+            outbox_dir,
+            restore.rollback_dir,
+            transfer.temp_dir,
+            transfer.inbox_dir,
+        ],
+    )
+    enabled_server_count = sum(server.enabled for server in servers)
+    required_copies = int(backup_raw.get("required_copies", enabled_server_count))
+    if enabled_server_count == 0 and required_copies != 0:
+        raise ValueError("backup.required_copies must be 0 when no Server is enabled")
+    if enabled_server_count > 0 and (
+        required_copies < 1 or required_copies > enabled_server_count
+    ):
+        raise ValueError(
+            f"backup.required_copies must be between 1 and {enabled_server_count}"
+        )
+
     return AppConfig(
         client=ClientSection(
             machine_id=machine_id,
+            display_name=str(client_raw.get("display_name") or machine_id),
             timezone=str(client_raw.get("timezone", "Asia/Shanghai")),
             data_dir=data_dir,
             temp_dir=temp_dir,
+            outbox_dir=outbox_dir,
         ),
-        server=ServerSection(
-            base_url=base_url.rstrip("/"),
-            token=token,
-            timeout_seconds=float(server_raw.get("timeout_seconds", 60)),
-            verify_tls=bool(server_raw.get("verify_tls", True)),
-        ),
+        servers=servers,
         backup=BackupSection(
             schedule_enabled=bool(backup_raw.get("schedule_enabled", False)),
             schedule_time=str(backup_raw.get("schedule_time", "04:00")),
@@ -245,10 +388,12 @@ def load_config(path: Path) -> AppConfig:
                 backup_raw.get("stability_check_interval_seconds", 1)
             ),
             retention_hint_days=int(backup_raw.get("retention_hint_days", 90)),
+            required_copies=required_copies,
+            keep_local_until_all_uploaded=bool(
+                backup_raw.get("keep_local_until_all_uploaded", True)
+            ),
         ),
         restore=restore,
-        tasks=[
-            _load_task(task_raw, index)
-            for index, task_raw in enumerate(_as_list(root.get("tasks"), "tasks"))
-        ],
+        transfer=transfer,
+        tasks=tasks,
     )
